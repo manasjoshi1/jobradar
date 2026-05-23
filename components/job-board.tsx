@@ -54,6 +54,7 @@ const statuses: Array<"ALL" | JobStatus> = [
 ];
 const sponsorships: Array<"ANY" | Sponsorship> = ["ANY", "YES", "NO", "UNKNOWN"];
 const providers = ["ALL", "GREENHOUSE", "LEVER", "ASHBY", "CUSTOM"];
+const MAX_VISIBLE_JOBS = 500;
 
 export function JobBoard({
   jobs,
@@ -254,8 +255,16 @@ function JobTable({ jobs, totalJobs }: { jobs: JobRow[]; totalJobs: number }) {
     return <EmptyState message="No jobs match these filters." />;
   }
 
+  const visibleJobs = jobs.slice(0, MAX_VISIBLE_JOBS);
+
   return (
     <section className="overflow-x-auto py-5">
+      {jobs.length > MAX_VISIBLE_JOBS ? (
+        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Showing first {MAX_VISIBLE_JOBS} of {jobs.length} matching jobs. Use
+          search or filters to narrow the list.
+        </p>
+      ) : null}
       <table className="w-full min-w-[1100px] border-separate border-spacing-0 text-left text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
@@ -272,7 +281,7 @@ function JobTable({ jobs, totalJobs }: { jobs: JobRow[]; totalJobs: number }) {
           </tr>
         </thead>
         <tbody>
-          {jobs.map((job) => (
+          {visibleJobs.map((job) => (
             <tr className="border-b border-slate-200 align-top" key={job.id}>
               <td className="border-t border-slate-200 py-4 pr-3">
                 <StatusBadge status={job.status} />
