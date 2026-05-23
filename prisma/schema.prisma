@@ -50,3 +50,37 @@ model Job {
 
   @@unique([sourceId, applyUrl])
 }
+
+model SyncRun {
+  id               String    @id @default(cuid())
+  startedAt        DateTime  @default(now())
+  finishedAt       DateTime?
+  status           String
+  sourcesProcessed Int       @default(0)
+  sourcesSucceeded Int       @default(0)
+  sourcesFailed    Int       @default(0)
+  jobsCreated      Int       @default(0)
+  jobsUpdated      Int       @default(0)
+  jobsMarkedStale  Int       @default(0)
+  errorSummary     String?
+  createdAt        DateTime  @default(now())
+
+  sourceRuns       SyncSourceRun[]
+}
+
+model SyncSourceRun {
+  id           String    @id @default(cuid())
+  syncRunId    String
+  sourceId     String?
+  company      String?
+  provider     String?
+  status       String
+  jobsFetched  Int       @default(0)
+  jobsCreated  Int       @default(0)
+  jobsUpdated  Int       @default(0)
+  errorMessage String?
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+
+  syncRun      SyncRun   @relation(fields: [syncRunId], references: [id])
+}
