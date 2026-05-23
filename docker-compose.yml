@@ -7,9 +7,10 @@ services:
     environment:
       DATABASE_URL: "file:/app/data/jobradar.db"
       JOB_SOURCE_FILE: "/app/imports/public_job_api_targets_321.xlsx"
+      NODE_ENV: "production"
       NODE_OPTIONS: "--max-old-space-size=384"
     volumes:
       - ./data:/app/data
-      - C:/Users/joshi/CascadeProjects/windsurf-project-2/cronfetcher:/app/imports:ro
+      - ./imports:/app/imports:ro
     mem_limit: 512m
     restart: unless-stopped

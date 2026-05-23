@@ -30,7 +30,9 @@ npm run db:studio
 
 Docker support is optional and uses one app container with SQLite persisted to
 the mounted `data` directory. The compose file caps the container at 512 MB and
-mounts the workbook folder read-only at `/app/imports`.
+mounts the local `imports` folder read-only at `/app/imports`.
+
+Place your `.xlsx` or `.txt` source file in `./imports`, then start the app:
 
 ```bash
 docker compose up --build
@@ -41,3 +43,5 @@ Seed sources inside the running container:
 ```bash
 docker compose exec jobradar npm run db:seed -- --file /app/imports/public_job_api_targets_321.xlsx
 ```
+
+Open [http://localhost:3000](http://localhost:3000).
