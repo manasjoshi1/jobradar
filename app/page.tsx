@@ -1,27 +1,51 @@
-export default function Home() {
-  return (
-    <main className="min-h-screen bg-slate-50 text-slate-950">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex items-center justify-between border-b border-slate-200 pb-4">
-          <h1 className="text-2xl font-semibold tracking-tight">JobRadar</h1>
-          <button
-            className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
-            type="button"
-          >
-            Sync Jobs
-          </button>
-        </header>
+import { JobBoard } from "@/components/job-board";
+import { prisma } from "@/lib/prisma";
+import type { JobStatus, Sponsorship } from "@/lib/types";
 
-        <section className="flex flex-1 items-center justify-center py-16">
-          <div className="max-w-md text-center">
-            <h2 className="text-xl font-semibold">Personal job tracker setup</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              The database, sync adapters, filters, and status actions will be
-              layered onto this one-page workspace.
-            </p>
-          </div>
-        </section>
-      </div>
-    </main>
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const [jobs, sources] = await Promise.all([
+    prisma.job.findMany({
+      include: {
+        source: {
+          select: {
+            provider: true,
+          },
+        },
+      },
+      orderBy: [{ lastSeenAt: "desc" }],
+    }),
+    prisma.jobSource.findMany({
+      orderBy: [{ provider: "asc" }, { company: "asc" }],
+    }),
+  ]);
+
+  return (
+    <JobBoard
+      jobs={jobs.map((job) => ({
+        id: job.id,
+        company: job.company,
+        title: job.title,
+        location: job.location,
+        department: job.department,
+        provider: job.source.provider,
+        description: job.description,
+        applyUrl: job.applyUrl,
+        postedAt: job.postedAt?.toISOString() ?? null,
+        firstSeenAt: job.firstSeenAt.toISOString(),
+        lastSeenAt: job.lastSeenAt.toISOString(),
+        status: job.status as JobStatus,
+        sponsorship: job.sponsorship as Sponsorship,
+      }))}
+      sources={sources.map((source) => ({
+        id: source.id,
+        company: source.company,
+        provider: source.provider,
+        enabled: source.enabled,
+        lastSyncAt: source.lastSyncAt?.toISOString() ?? null,
+        lastSyncStatus: source.lastSyncStatus,
+      }))}
+    />
   );
 }
