@@ -4,10 +4,49 @@
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model JobSource {
+  id             String    @id @default(cuid())
+  company        String
+  provider       String
+  url            String    @unique
+  enabled        Boolean   @default(true)
+  lastSyncAt     DateTime?
+  lastSyncStatus String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  jobs           Job[]
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  sourceId       String
+  externalId     String?
+  company        String
+  title          String
+  location       String?
+  department     String?
+  employmentType String?
+  applyUrl       String
+  description    String?
+  postedAt       DateTime?
+
+  sponsorship    String    @default("UNKNOWN")
+  status         String    @default("NEW")
+
+  firstSeenAt    DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  isActive       Boolean   @default(true)
+
+  source         JobSource @relation(fields: [sourceId], references: [id])
+
+  @@unique([sourceId, applyUrl])
 }
