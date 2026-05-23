@@ -1,16 +1,17 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { markJobStatus } from "@/app/actions/jobs";
+import { useRouter } from "next/navigation";
 import { SponsorshipBadge, StatusBadge } from "@/components/badges";
 import type { JobStatus, Sponsorship } from "@/lib/types";
 
-type JobRow = {
+export type JobBoardJob = {
   id: string;
   company: string;
   title: string;
   location: string | null;
   department: string | null;
+  employmentType: string | null;
   provider: string;
   description: string | null;
   applyUrl: string;
@@ -19,9 +20,10 @@ type JobRow = {
   lastSeenAt: string;
   status: JobStatus;
   sponsorship: Sponsorship;
+  isActive: boolean;
 };
 
-type SourceRow = {
+export type SourceSummary = {
   id: string;
   company: string;
   provider: string;
@@ -30,15 +32,27 @@ type SourceRow = {
   lastSyncStatus: string | null;
 };
 
-type SyncSummary = {
+export type SyncRunSummary = {
+  id: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
   sourcesProcessed: number;
   sourcesSucceeded: number;
   sourcesFailed: number;
   jobsCreated: number;
   jobsUpdated: number;
-};
+  jobsMarkedStale: number;
+  errorSummary: string | null;
+  failedSources: Array<{
+    id: string;
+    company: string | null;
+    provider: string | null;
+    errorMessage: string | null;
+  }>;
+} | null;
 
-type JobStats = {
+export type JobStats = {
   Total: number;
   New: number;
   Saved: number;
@@ -48,6 +62,19 @@ type JobStats = {
   "Sponsor No": number;
   Unknown: number;
 };
+
+type SyncSummary = {
+  sourcesProcessed: number;
+  sourcesSucceeded: number;
+  sourcesFailed: number;
+  jobsCreated: number;
+  jobsUpdated: number;
+  jobsMarkedStale?: number;
+  errors?: unknown[];
+};
+
+const DEFAULT_JOB_LIMIT = 1_000;
+const MAX_VISIBLE_JOBS = 500;
 
 const STATUS_ORDER: Record<JobStatus, number> = {
   NEW: 0,
@@ -65,53 +92,119 @@ const statuses: Array<"ALL" | JobStatus> = [
 ];
 const sponsorships: Array<"ANY" | Sponsorship> = ["ANY", "YES", "NO", "UNKNOWN"];
 const providers = ["ALL", "GREENHOUSE", "LEVER", "ASHBY", "CUSTOM"];
-const MAX_VISIBLE_JOBS = 500;
 
-export function JobBoard({
-  jobs,
-  sources,
-  stats,
+export function JobBoardClient({
+  initialJobs,
+  initialStats,
+  sourceSummary,
+  lastSyncRun,
   totalJobCount,
 }: {
-  jobs: JobRow[];
-  sources: SourceRow[];
-  stats: JobStats;
+  initialJobs: JobBoardJob[];
+  initialStats: JobStats;
+  sourceSummary: SourceSummary[];
+  lastSyncRun: SyncRunSummary;
   totalJobCount: number;
 }) {
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<(typeof statuses)[number]>("ALL");
-  const [sponsorship, setSponsorship] =
+  const router = useRouter();
+  const [jobs, setJobs] = useState(initialJobs);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] =
+    useState<(typeof statuses)[number]>("ALL");
+  const [sponsorshipFilter, setSponsorshipFilter] =
     useState<(typeof sponsorships)[number]>("ANY");
-  const [provider, setProvider] = useState("ALL");
-  const [location, setLocation] = useState("");
-  const [syncResult, setSyncResult] = useState<string | null>(null);
-  const [isSyncing, startSync] = useTransition();
+  const [providerFilter, setProviderFilter] = useState("ALL");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [syncLoading, startSyncTransition] = useTransition();
+  const [actionLoadingJobId, setActionLoadingJobId] = useState<string | null>(
+    null,
+  );
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const filteredJobs = useMemo(
     () =>
       jobs
-        .filter((job) => matchesFilters(job, query, status, sponsorship, provider, location))
+        .filter((job) =>
+          matchesFilters(
+            job,
+            search,
+            statusFilter,
+            sponsorshipFilter,
+            providerFilter,
+            locationFilter,
+          ),
+        )
         .sort(sortJobs),
-    [jobs, location, provider, query, sponsorship, status],
+    [jobs, locationFilter, providerFilter, search, sponsorshipFilter, statusFilter],
   );
 
+  function resetFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+    setSponsorshipFilter("ANY");
+    setProviderFilter("ALL");
+    setLocationFilter("");
+  }
+
   function syncJobs() {
-    startSync(async () => {
-      setSyncResult(null);
+    setMessage("Syncing jobs... this can take a while for 321 sources");
+    setError(null);
+
+    startSyncTransition(async () => {
       try {
         const response = await fetch("/api/sync", { method: "POST" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
         const result = (await response.json()) as SyncSummary;
-        setSyncResult(
-          `Sync complete: ${result.jobsCreated} created, ${result.jobsUpdated} updated, ${result.sourcesFailed} failed`,
+        setMessage(
+          `Sync complete: ${result.sourcesSucceeded}/${result.sourcesProcessed} sources succeeded, ${result.jobsCreated} created, ${result.jobsUpdated} updated, ${result.sourcesFailed} failed, ${result.errors?.length ?? 0} errors.`,
         );
-        window.location.reload();
-      } catch (error) {
-        setSyncResult(
-          error instanceof Error ? `Sync failed: ${error.message}` : "Sync failed",
+        router.refresh();
+      } catch (syncError) {
+        setError(
+          syncError instanceof Error
+            ? `Sync may still be running or timed out. Refresh after a minute. ${syncError.message}`
+            : "Sync may still be running or timed out. Refresh after a minute.",
         );
       }
     });
+  }
+
+  async function updateJobStatus(jobId: string, status: JobStatus) {
+    setActionLoadingJobId(jobId);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(body?.error ?? `HTTP ${response.status}`);
+      }
+
+      setJobs((previousJobs) =>
+        previousJobs.map((job) =>
+          job.id === jobId ? { ...job, status } : job,
+        ),
+      );
+      setMessage(`Marked job ${status.toLowerCase()}.`);
+    } catch (statusError) {
+      setError(
+        statusError instanceof Error
+          ? `Could not update status: ${statusError.message}`
+          : "Could not update status.",
+      );
+    } finally {
+      setActionLoadingJobId(null);
+    }
   }
 
   return (
@@ -121,11 +214,11 @@ export function JobBoard({
           <h1 className="text-2xl font-semibold tracking-tight">JobRadar</h1>
           <button
             className="rounded-md bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={isSyncing}
+            disabled={syncLoading}
             onClick={syncJobs}
             type="button"
           >
-            {isSyncing ? "Syncing..." : "Sync Jobs"}
+            {syncLoading ? "Syncing Jobs..." : "Sync Jobs"}
           </button>
         </div>
       </header>
@@ -136,48 +229,84 @@ export function JobBoard({
             Search
             <input
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-600"
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder="backend java spring aws remote"
-              value={query}
+              value={search}
             />
           </label>
 
-          <div className="grid gap-3 md:grid-cols-4">
-            <Select label="Status" onChange={setStatus} options={statuses} value={status} />
+          <div className="grid gap-3 md:grid-cols-5">
+            <Select
+              label="Status"
+              onChange={setStatusFilter}
+              options={statuses}
+              value={statusFilter}
+            />
             <Select
               label="Sponsorship"
-              onChange={setSponsorship}
+              onChange={setSponsorshipFilter}
               options={sponsorships}
-              value={sponsorship}
+              value={sponsorshipFilter}
             />
-            <Select label="Provider" onChange={setProvider} options={providers} value={provider} />
+            <Select
+              label="Provider"
+              onChange={setProviderFilter}
+              options={providers}
+              value={providerFilter}
+            />
             <label className="grid gap-1 text-sm font-medium text-slate-700">
               Location
               <input
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-600"
-                onChange={(event) => setLocation(event.target.value)}
+                onChange={(event) => setLocationFilter(event.target.value)}
                 placeholder="Remote, US, India, Chicago"
-                value={location}
+                value={locationFilter}
               />
             </label>
+            <div className="flex items-end">
+              <button
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                onClick={resetFilters}
+                type="button"
+              >
+                Reset Filters
+              </button>
+            </div>
           </div>
 
-          {syncResult ? (
-            <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-              {syncResult}
-            </p>
-          ) : null}
+          <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+            Showing {filteredJobs.length} of {jobs.length} loaded jobs. Showing
+            latest {Math.min(DEFAULT_JOB_LIMIT, totalJobCount)} jobs. Use
+            search/filters within loaded jobs.
+          </p>
+
           {totalJobCount > jobs.length ? (
             <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-              Loaded latest {jobs.length} of {totalJobCount} jobs for fast
+              Loaded latest {jobs.length} of {totalJobCount} total jobs for fast
               filtering.
+            </p>
+          ) : null}
+
+          {message ? (
+            <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              {message}
+            </p>
+          ) : null}
+          {error ? (
+            <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+              {error}
             </p>
           ) : null}
         </section>
 
-        <Stats stats={stats} />
-        <SourcesSummary sources={sources} />
-        <JobTable jobs={filteredJobs} totalJobs={jobs.length} />
+        <Stats stats={initialStats} />
+        <SourcesSummary lastSyncRun={lastSyncRun} sources={sourceSummary} />
+        <JobTable
+          actionLoadingJobId={actionLoadingJobId}
+          jobs={filteredJobs}
+          onStatusChange={updateJobStatus}
+          totalJobs={jobs.length}
+        />
       </main>
     </div>
   );
@@ -225,7 +354,13 @@ function Stats({ stats }: { stats: JobStats }) {
   );
 }
 
-function SourcesSummary({ sources }: { sources: SourceRow[] }) {
+function SourcesSummary({
+  sources,
+  lastSyncRun,
+}: {
+  sources: SourceSummary[];
+  lastSyncRun: SyncRunSummary;
+}) {
   const enabledSources = sources.filter((source) => source.enabled);
   const failedSources = sources.filter((source) =>
     source.lastSyncStatus?.startsWith("ERROR"),
@@ -246,7 +381,29 @@ function SourcesSummary({ sources }: { sources: SourceRow[] }) {
           Enabled: {enabledSources.length} / Failed: {failedSources.length} / Last
           sync: {lastSync ? formatDateTime(lastSync) : "Never"}
         </p>
-        {failedSources.length > 0 ? (
+        {lastSyncRun ? (
+          <p>
+            Last run: {lastSyncRun.status} at{" "}
+            {lastSyncRun.finishedAt
+              ? formatDateTime(lastSyncRun.finishedAt)
+              : "running"}{" "}
+            / {lastSyncRun.jobsCreated} created / {lastSyncRun.jobsUpdated}{" "}
+            updated / {lastSyncRun.jobsMarkedStale} stale
+          </p>
+        ) : null}
+        {lastSyncRun?.failedSources.length ? (
+          <ul className="grid gap-2">
+            {lastSyncRun.failedSources.slice(0, 10).map((source) => (
+              <li
+                className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2"
+                key={source.id}
+              >
+                <span className="font-medium">{source.company ?? "Unknown"}</span>:{" "}
+                {source.errorMessage}
+              </li>
+            ))}
+          </ul>
+        ) : failedSources.length > 0 ? (
           <ul className="grid gap-2">
             {failedSources.slice(0, 10).map((source) => (
               <li
@@ -264,11 +421,19 @@ function SourcesSummary({ sources }: { sources: SourceRow[] }) {
   );
 }
 
-function JobTable({ jobs, totalJobs }: { jobs: JobRow[]; totalJobs: number }) {
+function JobTable({
+  jobs,
+  totalJobs,
+  actionLoadingJobId,
+  onStatusChange,
+}: {
+  jobs: JobBoardJob[];
+  totalJobs: number;
+  actionLoadingJobId: string | null;
+  onStatusChange: (jobId: string, status: JobStatus) => void;
+}) {
   if (totalJobs === 0) {
-    return (
-      <EmptyState message="No jobs yet. Click Sync Jobs." />
-    );
+    return <EmptyState message="No jobs yet. Click Sync Jobs." />;
   }
 
   if (jobs.length === 0) {
@@ -285,7 +450,7 @@ function JobTable({ jobs, totalJobs }: { jobs: JobRow[]; totalJobs: number }) {
           search or filters to narrow the list.
         </p>
       ) : null}
-      <table className="w-full min-w-[1100px] border-separate border-spacing-0 text-left text-sm">
+      <table className="w-full min-w-[1180px] border-separate border-spacing-0 text-left text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
             <th className="py-3 pr-3">Status</th>
@@ -302,9 +467,19 @@ function JobTable({ jobs, totalJobs }: { jobs: JobRow[]; totalJobs: number }) {
         </thead>
         <tbody>
           {visibleJobs.map((job) => (
-            <tr className="border-b border-slate-200 align-top" key={job.id}>
+            <tr
+              className={`border-b border-slate-200 align-top ${job.isActive ? "" : "opacity-60"}`}
+              key={job.id}
+            >
               <td className="border-t border-slate-200 py-4 pr-3">
-                <StatusBadge status={job.status} />
+                <div className="grid gap-2">
+                  <StatusBadge status={job.status} />
+                  {!job.isActive ? (
+                    <span className="inline-flex rounded border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">
+                      Stale
+                    </span>
+                  ) : null}
+                </div>
               </td>
               <td className="border-t border-slate-200 py-4 pr-3">
                 <SponsorshipBadge sponsorship={job.sponsorship} />
@@ -327,7 +502,11 @@ function JobTable({ jobs, totalJobs }: { jobs: JobRow[]; totalJobs: number }) {
                 {formatDate(job.lastSeenAt)}
               </td>
               <td className="border-t border-slate-200 py-4">
-                <JobActions job={job} />
+                <JobActions
+                  disabled={actionLoadingJobId === job.id}
+                  job={job}
+                  onStatusChange={onStatusChange}
+                />
               </td>
             </tr>
           ))}
@@ -337,14 +516,21 @@ function JobTable({ jobs, totalJobs }: { jobs: JobRow[]; totalJobs: number }) {
   );
 }
 
-function JobActions({ job }: { job: JobRow }) {
-  const [isPending, startTransition] = useTransition();
-
-  function updateStatus(status: JobStatus) {
-    startTransition(async () => {
-      await markJobStatus(job.id, status);
-    });
-  }
+function JobActions({
+  job,
+  disabled,
+  onStatusChange,
+}: {
+  job: JobBoardJob;
+  disabled: boolean;
+  onStatusChange: (jobId: string, status: JobStatus) => void;
+}) {
+  const actionsByStatus: Record<JobStatus, JobStatus[]> = {
+    NEW: ["SAVED", "APPLIED", "SKIPPED"],
+    SAVED: ["NEW", "APPLIED", "SKIPPED"],
+    APPLIED: ["NEW", "SAVED", "SKIPPED"],
+    SKIPPED: ["NEW", "SAVED", "APPLIED"],
+  };
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -356,18 +542,15 @@ function JobActions({ job }: { job: JobRow }) {
       >
         Open
       </a>
-      <ActionButton disabled={isPending} onClick={() => updateStatus("SAVED")}>
-        Save
-      </ActionButton>
-      <ActionButton disabled={isPending} onClick={() => updateStatus("APPLIED")}>
-        Applied
-      </ActionButton>
-      <ActionButton disabled={isPending} onClick={() => updateStatus("SKIPPED")}>
-        Skip
-      </ActionButton>
-      <ActionButton disabled={isPending} onClick={() => updateStatus("NEW")}>
-        New
-      </ActionButton>
+      {actionsByStatus[job.status].map((status) => (
+        <ActionButton
+          disabled={disabled}
+          key={status}
+          onClick={() => onStatusChange(job.id, status)}
+        >
+          {status === "SAVED" ? "Save" : status[0] + status.slice(1).toLowerCase()}
+        </ActionButton>
+      ))}
     </div>
   );
 }
@@ -388,7 +571,7 @@ function ActionButton({
       onClick={onClick}
       type="button"
     >
-      {children}
+      {disabled ? "Saving..." : children}
     </button>
   );
 }
@@ -404,37 +587,42 @@ function EmptyState({ message }: { message: string }) {
 }
 
 function matchesFilters(
-  job: JobRow,
-  query: string,
-  status: string,
-  sponsorship: string,
-  provider: string,
-  location: string,
+  job: JobBoardJob,
+  search: string,
+  statusFilter: string,
+  sponsorshipFilter: string,
+  providerFilter: string,
+  locationFilter: string,
 ) {
   const haystack = [
     job.title,
     job.company,
     job.location,
     job.department,
+    job.employmentType,
+    job.provider,
+    job.sponsorship,
+    job.status,
+    job.applyUrl,
     job.description,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  const normalizedQuery = query.trim().toLowerCase();
-  const normalizedLocation = location.trim().toLowerCase();
+  const normalizedSearch = search.trim().toLowerCase();
+  const normalizedLocation = locationFilter.trim().toLowerCase();
 
   return (
-    (!normalizedQuery || haystack.includes(normalizedQuery)) &&
-    (status === "ALL" || job.status === status) &&
-    (sponsorship === "ANY" || job.sponsorship === sponsorship) &&
-    (provider === "ALL" || job.provider === provider) &&
+    (!normalizedSearch || haystack.includes(normalizedSearch)) &&
+    (statusFilter === "ALL" || job.status === statusFilter) &&
+    (sponsorshipFilter === "ANY" || job.sponsorship === sponsorshipFilter) &&
+    (providerFilter === "ALL" || job.provider === providerFilter) &&
     (!normalizedLocation ||
       (job.location ?? "").toLowerCase().includes(normalizedLocation))
   );
 }
 
-function sortJobs(a: JobRow, b: JobRow) {
+function sortJobs(a: JobBoardJob, b: JobBoardJob) {
   const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
   if (statusDiff !== 0) return statusDiff;
 

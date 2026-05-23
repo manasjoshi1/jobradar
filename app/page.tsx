@@ -1,4 +1,4 @@
-import { JobBoard } from "@/components/job-board";
+import { JobBoardClient } from "@/components/JobBoardClient";
 import { prisma } from "@/lib/prisma";
 import type { JobStatus, Sponsorship } from "@/lib/types";
 
@@ -26,6 +26,7 @@ export default async function Home() {
         title: true,
         location: true,
         department: true,
+        employmentType: true,
         description: true,
         applyUrl: true,
         postedAt: true,
@@ -33,6 +34,7 @@ export default async function Home() {
         lastSeenAt: true,
         status: true,
         sponsorship: true,
+        isActive: true,
         source: {
           select: {
             provider: true,
@@ -55,13 +57,14 @@ export default async function Home() {
   ]);
 
   return (
-    <JobBoard
-      jobs={jobs.map((job) => ({
+    <JobBoardClient
+      initialJobs={jobs.map((job) => ({
         id: job.id,
         company: job.company,
         title: job.title,
         location: job.location,
         department: job.department,
+        employmentType: job.employmentType,
         provider: job.source.provider,
         description: job.description,
         applyUrl: job.applyUrl,
@@ -70,8 +73,9 @@ export default async function Home() {
         lastSeenAt: job.lastSeenAt.toISOString(),
         status: job.status as JobStatus,
         sponsorship: job.sponsorship as Sponsorship,
+        isActive: job.isActive,
       }))}
-      stats={{
+      initialStats={{
         Total: totalJobs,
         New: newJobs,
         Saved: savedJobs,
@@ -81,7 +85,8 @@ export default async function Home() {
         "Sponsor No": sponsorNoJobs,
         Unknown: sponsorUnknownJobs,
       }}
-      sources={sources.map((source) => ({
+      lastSyncRun={null}
+      sourceSummary={sources.map((source) => ({
         id: source.id,
         company: source.company,
         provider: source.provider,
