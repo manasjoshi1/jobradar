@@ -1,13 +1,12 @@
 import { JobBoardClient } from "@/components/JobBoardClient";
+import { DEFAULT_PAGE_SIZE, getPaginatedJobs } from "@/lib/jobs-query";
 import { prisma } from "@/lib/prisma";
-import type { JobStatus, Sponsorship } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-const JOBS_TO_LOAD = 1_000;
 
 export default async function Home() {
   const [
-    jobs,
+    initialJobsPage,
     sources,
     totalJobs,
     newJobs,
@@ -19,31 +18,7 @@ export default async function Home() {
     sponsorUnknownJobs,
     lastSyncRun,
   ] = await Promise.all([
-    prisma.job.findMany({
-      take: JOBS_TO_LOAD,
-      select: {
-        id: true,
-        company: true,
-        title: true,
-        location: true,
-        department: true,
-        employmentType: true,
-        description: true,
-        applyUrl: true,
-        postedAt: true,
-        firstSeenAt: true,
-        lastSeenAt: true,
-        status: true,
-        sponsorship: true,
-        isActive: true,
-        source: {
-          select: {
-            provider: true,
-          },
-        },
-      },
-      orderBy: [{ lastSeenAt: "desc" }, { postedAt: "desc" }],
-    }),
+    getPaginatedJobs({ page: 1, pageSize: DEFAULT_PAGE_SIZE, active: "true" }),
     prisma.jobSource.findMany({
       orderBy: [{ provider: "asc" }, { company: "asc" }],
     }),
@@ -69,23 +44,9 @@ export default async function Home() {
 
   return (
     <JobBoardClient
-      initialJobs={jobs.map((job) => ({
-        id: job.id,
-        company: job.company,
-        title: job.title,
-        location: job.location,
-        department: job.department,
-        employmentType: job.employmentType,
-        provider: job.source.provider,
-        description: job.description,
-        applyUrl: job.applyUrl,
-        postedAt: job.postedAt?.toISOString() ?? null,
-        firstSeenAt: job.firstSeenAt.toISOString(),
-        lastSeenAt: job.lastSeenAt.toISOString(),
-        status: job.status as JobStatus,
-        sponsorship: job.sponsorship as Sponsorship,
-        isActive: job.isActive,
-      }))}
+      initialJobs={initialJobsPage.jobs}
+      initialPage={initialJobsPage.page}
+      initialPageSize={initialJobsPage.pageSize}
       initialStats={{
         Total: totalJobs,
         New: newJobs,
@@ -96,6 +57,8 @@ export default async function Home() {
         "Sponsor No": sponsorNoJobs,
         Unknown: sponsorUnknownJobs,
       }}
+      initialTotal={initialJobsPage.total}
+      initialTotalPages={initialJobsPage.totalPages}
       lastSyncRun={
         lastSyncRun
           ? {
@@ -127,7 +90,6 @@ export default async function Home() {
         lastSyncAt: source.lastSyncAt?.toISOString() ?? null,
         lastSyncStatus: source.lastSyncStatus,
       }))}
-      totalJobCount={totalJobs}
     />
   );
 }

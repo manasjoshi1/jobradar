@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SponsorshipBadge, StatusBadge } from "@/components/badges";
 import type { JobStatus, Sponsorship } from "@/lib/types";
@@ -73,16 +73,6 @@ type SyncSummary = {
   errors?: unknown[];
 };
 
-const DEFAULT_JOB_LIMIT = 1_000;
-const MAX_VISIBLE_JOBS = 500;
-
-const STATUS_ORDER: Record<JobStatus, number> = {
-  NEW: 0,
-  SAVED: 1,
-  APPLIED: 2,
-  SKIPPED: 3,
-};
-
 const statuses: Array<"ALL" | JobStatus> = [
   "ALL",
   "NEW",
@@ -92,29 +82,45 @@ const statuses: Array<"ALL" | JobStatus> = [
 ];
 const sponsorships: Array<"ANY" | Sponsorship> = ["ANY", "YES", "NO", "UNKNOWN"];
 const providers = ["ALL", "GREENHOUSE", "LEVER", "ASHBY", "CUSTOM"];
+const activeOptions = ["true", "all", "false"] as const;
+const pageSizes = [25, 50, 100];
 
 export function JobBoardClient({
   initialJobs,
+  initialPage,
+  initialPageSize,
+  initialTotal,
+  initialTotalPages,
   initialStats,
   sourceSummary,
   lastSyncRun,
-  totalJobCount,
 }: {
   initialJobs: JobBoardJob[];
+  initialPage: number;
+  initialPageSize: number;
+  initialTotal: number;
+  initialTotalPages: number;
   initialStats: JobStats;
   sourceSummary: SourceSummary[];
   lastSyncRun: SyncRunSummary;
-  totalJobCount: number;
 }) {
   const router = useRouter();
   const [jobs, setJobs] = useState(initialJobs);
+  const [page, setPage] = useState(initialPage);
+  const [pageSize, setPageSize] = useState(initialPageSize);
+  const [total, setTotal] = useState(initialTotal);
+  const [totalPages, setTotalPages] = useState(initialTotalPages);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<(typeof statuses)[number]>("ALL");
   const [sponsorshipFilter, setSponsorshipFilter] =
     useState<(typeof sponsorships)[number]>("ANY");
   const [providerFilter, setProviderFilter] = useState("ALL");
   const [locationFilter, setLocationFilter] = useState("");
+  const [activeFilter, setActiveFilter] =
+    useState<(typeof activeOptions)[number]>("true");
+  const [jobsLoading, setJobsLoading] = useState(false);
   const [syncLoading, startSyncTransition] = useTransition();
   const [actionLoadingJobId, setActionLoadingJobId] = useState<string | null>(
     null,
@@ -122,29 +128,95 @@ export function JobBoardClient({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const filteredJobs = useMemo(
-    () =>
-      jobs
-        .filter((job) =>
-          matchesFilters(
-            job,
-            search,
-            statusFilter,
-            sponsorshipFilter,
-            providerFilter,
-            locationFilter,
-          ),
-        )
-        .sort(sortJobs),
-    [jobs, locationFilter, providerFilter, search, sponsorshipFilter, statusFilter],
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [search]);
+
+  const fetchJobs = useCallback(
+    async (nextPage = page) => {
+      setJobsLoading(true);
+      setError(null);
+
+      try {
+        const params = new URLSearchParams({
+          page: String(nextPage),
+          pageSize: String(pageSize),
+          active: activeFilter,
+        });
+
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        if (statusFilter !== "ALL") params.set("status", statusFilter);
+        if (sponsorshipFilter !== "ANY") {
+          params.set("sponsorship", sponsorshipFilter);
+        }
+        if (providerFilter !== "ALL") params.set("provider", providerFilter);
+        if (locationFilter.trim()) params.set("location", locationFilter.trim());
+
+        const response = await fetch(`/api/jobs?${params.toString()}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const result = (await response.json()) as {
+          jobs: JobBoardJob[];
+          page: number;
+          pageSize: number;
+          total: number;
+          totalPages: number;
+        };
+
+        setJobs(result.jobs);
+        setPage(result.page);
+        setPageSize(result.pageSize);
+        setTotal(result.total);
+        setTotalPages(result.totalPages);
+      } catch (jobError) {
+        setError(
+          jobError instanceof Error
+            ? `Could not load jobs: ${jobError.message}`
+            : "Could not load jobs.",
+        );
+      } finally {
+        setJobsLoading(false);
+      }
+    },
+    [
+      activeFilter,
+      debouncedSearch,
+      locationFilter,
+      page,
+      pageSize,
+      providerFilter,
+      sponsorshipFilter,
+      statusFilter,
+    ],
   );
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void fetchJobs(page);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [fetchJobs, page]);
 
   function resetFilters() {
     setSearch("");
+    setDebouncedSearch("");
     setStatusFilter("ALL");
     setSponsorshipFilter("ANY");
     setProviderFilter("ALL");
     setLocationFilter("");
+    setActiveFilter("true");
+    setPage(1);
+  }
+
+  function updateFilter(update: () => void) {
+    update();
+    setPage(1);
   }
 
   function syncJobs() {
@@ -161,6 +233,7 @@ export function JobBoardClient({
           `Sync complete: ${result.sourcesSucceeded}/${result.sourcesProcessed} sources succeeded, ${result.jobsCreated} created, ${result.jobsUpdated} updated, ${result.sourcesFailed} failed, ${result.errors?.length ?? 0} errors.`,
         );
         router.refresh();
+        await fetchJobs(1);
       } catch (syncError) {
         setError(
           syncError instanceof Error
@@ -238,19 +311,19 @@ export function JobBoardClient({
           <div className="grid gap-3 md:grid-cols-5">
             <Select
               label="Status"
-              onChange={setStatusFilter}
+              onChange={(value) => updateFilter(() => setStatusFilter(value))}
               options={statuses}
               value={statusFilter}
             />
             <Select
               label="Sponsorship"
-              onChange={setSponsorshipFilter}
+              onChange={(value) => updateFilter(() => setSponsorshipFilter(value))}
               options={sponsorships}
               value={sponsorshipFilter}
             />
             <Select
               label="Provider"
-              onChange={setProviderFilter}
+              onChange={(value) => updateFilter(() => setProviderFilter(value))}
               options={providers}
               value={providerFilter}
             />
@@ -258,14 +331,62 @@ export function JobBoardClient({
               Location
               <input
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-600"
-                onChange={(event) => setLocationFilter(event.target.value)}
+                onChange={(event) =>
+                  updateFilter(() => setLocationFilter(event.target.value))
+                }
                 placeholder="Remote, US, India, Chicago"
                 value={locationFilter}
               />
             </label>
-            <div className="flex items-end">
+            <Select
+              label="Active"
+              onChange={(value) => updateFilter(() => setActiveFilter(value))}
+              options={activeOptions}
+              value={activeFilter}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Page Size
+              <select
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-600"
+                onChange={(event) =>
+                  updateFilter(() => setPageSize(Number(event.target.value)))
+                }
+                value={pageSize}
+              >
+                {pageSizes.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-end gap-2">
               <button
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={page <= 1 || jobsLoading}
+                onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
+                type="button"
+              >
+                Previous
+              </button>
+              <span className="px-2 py-2 text-sm text-slate-600">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={page >= totalPages || jobsLoading}
+                onClick={() =>
+                  setPage((currentPage) => Math.min(totalPages, currentPage + 1))
+                }
+                type="button"
+              >
+                Next
+              </button>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
                 onClick={resetFilters}
                 type="button"
               >
@@ -275,17 +396,15 @@ export function JobBoardClient({
           </div>
 
           <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-            Showing {filteredJobs.length} of {jobs.length} loaded jobs. Showing
-            latest {Math.min(DEFAULT_JOB_LIMIT, totalJobCount)} jobs. Use
-            search/filters within loaded jobs.
+            {jobsLoading
+              ? "Loading jobs..."
+              : `Showing ${pageStart(total, page, pageSize)}-${pageEnd(
+                  total,
+                  page,
+                  pageSize,
+                  jobs.length,
+                )} of ${total} jobs`}
           </p>
-
-          {totalJobCount > jobs.length ? (
-            <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-              Loaded latest {jobs.length} of {totalJobCount} total jobs for fast
-              filtering.
-            </p>
-          ) : null}
 
           {message ? (
             <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
@@ -303,9 +422,9 @@ export function JobBoardClient({
         <SourcesSummary lastSyncRun={lastSyncRun} sources={sourceSummary} />
         <JobTable
           actionLoadingJobId={actionLoadingJobId}
-          jobs={filteredJobs}
+          jobs={jobs}
           onStatusChange={updateJobStatus}
-          totalJobs={jobs.length}
+          totalJobs={total}
         />
       </main>
     </div>
@@ -319,7 +438,7 @@ function Select<T extends string>({
   onChange,
 }: {
   label: string;
-  options: T[];
+  options: readonly T[];
   value: T;
   onChange: (value: T) => void;
 }) {
@@ -440,16 +559,8 @@ function JobTable({
     return <EmptyState message="No jobs match these filters." />;
   }
 
-  const visibleJobs = jobs.slice(0, MAX_VISIBLE_JOBS);
-
   return (
     <section className="overflow-x-auto py-5">
-      {jobs.length > MAX_VISIBLE_JOBS ? (
-        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Showing first {MAX_VISIBLE_JOBS} of {jobs.length} matching jobs. Use
-          search or filters to narrow the list.
-        </p>
-      ) : null}
       <table className="w-full min-w-[1180px] border-separate border-spacing-0 text-left text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
@@ -466,7 +577,7 @@ function JobTable({
           </tr>
         </thead>
         <tbody>
-          {visibleJobs.map((job) => (
+          {jobs.map((job) => (
             <tr
               className={`border-b border-slate-200 align-top ${job.isActive ? "" : "opacity-60"}`}
               key={job.id}
@@ -586,58 +697,26 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-function matchesFilters(
-  job: JobBoardJob,
-  search: string,
-  statusFilter: string,
-  sponsorshipFilter: string,
-  providerFilter: string,
-  locationFilter: string,
-) {
-  const haystack = [
-    job.title,
-    job.company,
-    job.location,
-    job.department,
-    job.employmentType,
-    job.provider,
-    job.sponsorship,
-    job.status,
-    job.applyUrl,
-    job.description,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  const normalizedSearch = search.trim().toLowerCase();
-  const normalizedLocation = locationFilter.trim().toLowerCase();
-
-  return (
-    (!normalizedSearch || haystack.includes(normalizedSearch)) &&
-    (statusFilter === "ALL" || job.status === statusFilter) &&
-    (sponsorshipFilter === "ANY" || job.sponsorship === sponsorshipFilter) &&
-    (providerFilter === "ALL" || job.provider === providerFilter) &&
-    (!normalizedLocation ||
-      (job.location ?? "").toLowerCase().includes(normalizedLocation))
-  );
-}
-
-function sortJobs(a: JobBoardJob, b: JobBoardJob) {
-  const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
-  if (statusDiff !== 0) return statusDiff;
-
-  return dateValue(b.postedAt ?? b.firstSeenAt) - dateValue(a.postedAt ?? a.firstSeenAt);
-}
-
-function dateValue(value: string | null) {
-  return value ? new Date(value).getTime() : 0;
-}
-
 function formatDate(value: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(
     new Date(value),
   );
+}
+
+function pageStart(total: number, page: number, pageSize: number) {
+  if (total === 0) return 0;
+  return (page - 1) * pageSize + 1;
+}
+
+function pageEnd(
+  total: number,
+  page: number,
+  pageSize: number,
+  currentPageCount: number,
+) {
+  if (total === 0) return 0;
+  return Math.min((page - 1) * pageSize + currentPageCount, total);
 }
 
 function formatDateTime(value: string) {
