@@ -38,6 +38,17 @@ type SyncSummary = {
   jobsUpdated: number;
 };
 
+type JobStats = {
+  Total: number;
+  New: number;
+  Saved: number;
+  Applied: number;
+  Skipped: number;
+  "Sponsor Yes": number;
+  "Sponsor No": number;
+  Unknown: number;
+};
+
 const STATUS_ORDER: Record<JobStatus, number> = {
   NEW: 0,
   SAVED: 1,
@@ -59,9 +70,13 @@ const MAX_VISIBLE_JOBS = 500;
 export function JobBoard({
   jobs,
   sources,
+  stats,
+  totalJobCount,
 }: {
   jobs: JobRow[];
   sources: SourceRow[];
+  stats: JobStats;
+  totalJobCount: number;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<(typeof statuses)[number]>("ALL");
@@ -72,7 +87,6 @@ export function JobBoard({
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [isSyncing, startSync] = useTransition();
 
-  const stats = useMemo(() => buildStats(jobs), [jobs]);
   const filteredJobs = useMemo(
     () =>
       jobs
@@ -153,6 +167,12 @@ export function JobBoard({
               {syncResult}
             </p>
           ) : null}
+          {totalJobCount > jobs.length ? (
+            <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+              Loaded latest {jobs.length} of {totalJobCount} jobs for fast
+              filtering.
+            </p>
+          ) : null}
         </section>
 
         <Stats stats={stats} />
@@ -192,7 +212,7 @@ function Select<T extends string>({
   );
 }
 
-function Stats({ stats }: { stats: ReturnType<typeof buildStats> }) {
+function Stats({ stats }: { stats: JobStats }) {
   return (
     <section className="grid grid-cols-2 gap-3 border-b border-slate-200 py-5 sm:grid-cols-4 lg:grid-cols-8">
       {Object.entries(stats).map(([label, value]) => (
@@ -381,19 +401,6 @@ function EmptyState({ message }: { message: string }) {
       </p>
     </section>
   );
-}
-
-function buildStats(jobs: JobRow[]) {
-  return {
-    Total: jobs.length,
-    New: jobs.filter((job) => job.status === "NEW").length,
-    Saved: jobs.filter((job) => job.status === "SAVED").length,
-    Applied: jobs.filter((job) => job.status === "APPLIED").length,
-    Skipped: jobs.filter((job) => job.status === "SKIPPED").length,
-    "Sponsor Yes": jobs.filter((job) => job.sponsorship === "YES").length,
-    "Sponsor No": jobs.filter((job) => job.sponsorship === "NO").length,
-    Unknown: jobs.filter((job) => job.sponsorship === "UNKNOWN").length,
-  };
 }
 
 function matchesFilters(
