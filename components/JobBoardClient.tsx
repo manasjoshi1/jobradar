@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SponsorshipBadge, StatusBadge } from "@/components/badges";
 import type { JobStatus, Sponsorship } from "@/lib/types";
@@ -127,6 +127,7 @@ export function JobBoardClient({
   );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refetchKey, setRefetchKey] = useState(0);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -137,71 +138,62 @@ export function JobBoardClient({
     return () => window.clearTimeout(timeout);
   }, [search]);
 
-  const fetchJobs = useCallback(
-    async (nextPage = page) => {
-      setJobsLoading(true);
-      setError(null);
+  useEffect(() => {
+    const controller = new AbortController();
 
-      try {
-        const params = new URLSearchParams({
-          page: String(nextPage),
-          pageSize: String(pageSize),
-          active: activeFilter,
-        });
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+      active: activeFilter,
+    });
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (statusFilter !== "ALL") params.set("status", statusFilter);
+    if (sponsorshipFilter !== "ANY") params.set("sponsorship", sponsorshipFilter);
+    if (providerFilter !== "ALL") params.set("provider", providerFilter);
+    if (locationFilter.trim()) params.set("location", locationFilter.trim());
 
-        if (debouncedSearch) params.set("search", debouncedSearch);
-        if (statusFilter !== "ALL") params.set("status", statusFilter);
-        if (sponsorshipFilter !== "ANY") {
-          params.set("sponsorship", sponsorshipFilter);
-        }
-        if (providerFilter !== "ALL") params.set("provider", providerFilter);
-        if (locationFilter.trim()) params.set("location", locationFilter.trim());
+    setJobsLoading(true);
+    setError(null);
 
-        const response = await fetch(`/api/jobs?${params.toString()}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const result = (await response.json()) as {
+    fetch(`/api/jobs?${params.toString()}`, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<{
           jobs: JobBoardJob[];
           page: number;
           pageSize: number;
           total: number;
           totalPages: number;
-        };
-
-        setJobs(result.jobs);
-        setPage(result.page);
-        setPageSize(result.pageSize);
-        setTotal(result.total);
-        setTotalPages(result.totalPages);
-      } catch (jobError) {
+        }>;
+      })
+      .then((data) => {
+        setJobs(data.jobs);
+        setTotal(data.total);
+        setTotalPages(data.totalPages);
+        setJobsLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return;
         setError(
-          jobError instanceof Error
-            ? `Could not load jobs: ${jobError.message}`
+          err instanceof Error
+            ? `Could not load jobs: ${err.message}`
             : "Could not load jobs.",
         );
-      } finally {
         setJobsLoading(false);
-      }
-    },
-    [
-      activeFilter,
-      debouncedSearch,
-      locationFilter,
-      page,
-      pageSize,
-      providerFilter,
-      sponsorshipFilter,
-      statusFilter,
-    ],
-  );
+      });
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      void fetchJobs(page);
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, [fetchJobs, page]);
+    return () => controller.abort();
+  }, [
+    page,
+    pageSize,
+    debouncedSearch,
+    statusFilter,
+    sponsorshipFilter,
+    providerFilter,
+    locationFilter,
+    activeFilter,
+    refetchKey,
+  ]);
 
   function resetFilters() {
     setSearch("");
@@ -233,7 +225,8 @@ export function JobBoardClient({
           `Sync complete: ${result.sourcesSucceeded}/${result.sourcesProcessed} sources succeeded, ${result.jobsCreated} created, ${result.jobsUpdated} updated, ${result.sourcesFailed} failed, ${result.errors?.length ?? 0} errors.`,
         );
         router.refresh();
-        await fetchJobs(1);
+        setPage(1);
+        setRefetchKey((k) => k + 1);
       } catch (syncError) {
         setError(
           syncError instanceof Error
