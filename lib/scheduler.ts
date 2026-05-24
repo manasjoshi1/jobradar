@@ -9,7 +9,7 @@
  *   4. Send notification for any unnotified unique jobs (self-managed by service)
  */
 import cron from "node-cron";
-import { runRecommendations } from "@/lib/services/recommendation-service";
+import { runUserRecommendations, getDefaultUserId } from "@/lib/services/user-recommendation-service";
 import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
 import { runSync } from "@/lib/services/sync-service";
 import { sendRecommendationNotification } from "@/lib/services/notification-service";
@@ -38,8 +38,9 @@ async function runScheduledJob() {
       `(${(syncResult.durationMs / 1000).toFixed(1)}s)`,
     );
 
-    // 3. Score recommendations (48h window catches all recent jobs)
-    const recResult = await runRecommendations(48);
+    // 3. Score recommendations per-user (48h window catches all recent jobs)
+    const userId = await getDefaultUserId();
+    const recResult = await runUserRecommendations(userId, 48);
     console.log(
       `[scheduler] Recs done — scanned=${recResult.jobsScanned} ` +
       `created=${recResult.recommendationsCreated} updated=${recResult.recommendationsUpdated}`,

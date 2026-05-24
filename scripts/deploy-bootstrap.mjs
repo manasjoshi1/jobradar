@@ -52,23 +52,27 @@ run('recover abandoned runs (threshold 10m)', 'node scripts/recover-abandoned-ru
 // ── 5. Seed default user + migrate notification prefs ─────────────────────────
 run('seed default user + notification prefs', 'node scripts/seed-default-user.mjs');
 
+// ── 6. Import user config (role profiles + preferences) ──────────────────────
+run('import user config', 'node scripts/import-user-config.mjs --file ./config/users/default-user.yml');
+
+// ── 7. Migrate existing global data to default user ──────────────────────────
+run('migrate global data to default user', 'node scripts/migrate-default-user.mjs');
+
 // ── Final summary ─────────────────────────────────────────────────────────────
 console.log('\n═══════════════════════════════════════════════');
 console.log('  Deploy bootstrap complete — DB snapshot');
 console.log('═══════════════════════════════════════════════');
 
+const defaultUser = await prisma.user.findFirst({ where: { isDefault: true }, select: { id: true, name: true } });
+
 const [
-  totalJobs,
-  activeJobs,
-  totalSources,
-  enabledSources,
-  totalProfiles,
-  enabledProfiles,
-  totalRecs,
+  totalJobs, activeJobs, totalSources, enabledSources,
+  totalProfiles, enabledProfiles,
   runningSyncRuns,
-  runningRecRuns,
-  defaultUser,
-  unnotifiedRecs,
+  // User-level counts
+  userProfiles, userEnabledProfiles,
+  userRecs, userUnnotifiedRecs,
+  userStatuses,
 ] = await Promise.all([
   prisma.job.count(),
   prisma.job.count({ where: { isActive: true } }),
@@ -76,11 +80,12 @@ const [
   prisma.jobSource.count({ where: { enabled: true } }),
   prisma.roleProfile.count(),
   prisma.roleProfile.count({ where: { enabled: true } }),
-  prisma.jobRecommendation.count(),
   prisma.syncRun.count({ where: { status: 'RUNNING' } }),
-  prisma.recommendationRun.count({ where: { status: 'RUNNING' } }),
-  prisma.user.findFirst({ where: { isDefault: true }, select: { id: true, name: true } }),
-  prisma.jobRecommendation.count({ where: { notifiedAt: null, status: 'UNSEEN' } }),
+  defaultUser ? prisma.userRoleProfile.count({ where: { userId: defaultUser.id } }) : 0,
+  defaultUser ? prisma.userRoleProfile.count({ where: { userId: defaultUser.id, enabled: true } }) : 0,
+  defaultUser ? prisma.userJobRecommendation.count({ where: { userId: defaultUser.id } }) : 0,
+  defaultUser ? prisma.userJobRecommendation.count({ where: { userId: defaultUser.id, notifiedAt: null, status: 'UNSEEN' } }) : 0,
+  defaultUser ? prisma.userJobStatus.count({ where: { userId: defaultUser.id } }) : 0,
 ]);
 
 const nullEffective = await prisma.job.count({ where: { effectiveNewAt: null } });
@@ -88,11 +93,12 @@ const nullEffective = await prisma.job.count({ where: { effectiveNewAt: null } }
 console.log(`  Jobs              : ${activeJobs} active / ${totalJobs} total`);
 console.log(`  Null effectiveNewAt: ${nullEffective}`);
 console.log(`  JobSources        : ${enabledSources} enabled / ${totalSources} total`);
-console.log(`  RoleProfiles      : ${enabledProfiles} enabled / ${totalProfiles} total`);
-console.log(`  Recommendations   : ${totalRecs} total (${unnotifiedRecs} unnotified)`);
+console.log(`  Global RoleProfiles: ${enabledProfiles} enabled / ${totalProfiles} total`);
 console.log(`  Default User      : ${defaultUser ? `${defaultUser.name} (${defaultUser.id})` : 'none'}`);
+console.log(`  User RoleProfiles : ${userEnabledProfiles} enabled / ${userProfiles} total`);
+console.log(`  User Recs         : ${userRecs} total (${userUnnotifiedRecs} unnotified)`);
+console.log(`  User JobStatuses  : ${userStatuses}`);
 console.log(`  RUNNING SyncRuns  : ${runningSyncRuns}`);
-console.log(`  RUNNING RecRuns   : ${runningRecRuns}`);
 console.log('═══════════════════════════════════════════════\n');
 
 await prisma.$disconnect();

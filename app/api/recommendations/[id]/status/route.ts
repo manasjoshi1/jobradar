@@ -1,51 +1,29 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
 
 export const dynamic = "force-dynamic";
 
 type RecStatus = "UNSEEN" | "SEEN" | "SAVED" | "APPLIED" | "SKIPPED";
-
 const VALID_STATUSES = new Set<RecStatus>(["UNSEEN", "SEEN", "SAVED", "APPLIED", "SKIPPED"]);
 
-/**
- * Recommendation → Job status mirroring rules:
- * - SAVED   → Job.status = SAVED   only if current Job.status is NEW
- * - APPLIED → Job.status = APPLIED unless already APPLIED
- * - SKIPPED → Job.status = SKIPPED only if current Job.status is NEW or SAVED
- * - SEEN / UNSEEN → no change to Job.status
- * APPLIED is highest priority — never downgrade from APPLIED.
- */
-async function mirrorToJob(
-  jobId: string,
-  recStatus: RecStatus,
-): Promise<void> {
-  if (recStatus === "SEEN" || recStatus === "UNSEEN") return;
-
-  const job = await prisma.job.findUnique({
-    where: { id: jobId },
-    select: { status: true },
+/** Upsert UserJobStatus for the user/job combination. */
+async function upsertUserJobStatus(userId: string, jobId: string, status: RecStatus) {
+  if (status === "SEEN" || status === "UNSEEN") return;
+  await prisma.userJobStatus.upsert({
+    where:  { userId_jobId: { userId, jobId } },
+    update: {
+      status,
+      appliedAt: status === "APPLIED" ? new Date() : undefined,
+      updatedAt: new Date(),
+    },
+    create: {
+      userId,
+      jobId,
+      status,
+      appliedAt: status === "APPLIED" ? new Date() : null,
+    },
   });
-  if (!job) return;
-
-  const current = job.status;
-
-  // Never downgrade APPLIED
-  if (current === "APPLIED") return;
-
-  if (recStatus === "APPLIED") {
-    await prisma.job.update({ where: { id: jobId }, data: { status: "APPLIED" } });
-    return;
-  }
-
-  if (recStatus === "SAVED" && current === "NEW") {
-    await prisma.job.update({ where: { id: jobId }, data: { status: "SAVED" } });
-    return;
-  }
-
-  if (recStatus === "SKIPPED" && (current === "NEW" || current === "SAVED")) {
-    await prisma.job.update({ where: { id: jobId }, data: { status: "SKIPPED" } });
-    return;
-  }
 }
 
 export async function PATCH(
@@ -68,22 +46,28 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const rec = await prisma.jobRecommendation.findUnique({
+  let userId: string;
+  try {
+    userId = await getDefaultUserId();
+  } catch {
+    return NextResponse.json({ error: "No default user" }, { status: 500 });
+  }
+
+  const rec = await prisma.userJobRecommendation.findUnique({
     where: { id },
-    select: { id: true, jobId: true },
+    select: { id: true, jobId: true, userId: true },
   });
 
   if (!rec) {
     return NextResponse.json({ error: "Recommendation not found" }, { status: 404 });
   }
 
-  await prisma.jobRecommendation.update({
+  await prisma.userJobRecommendation.update({
     where: { id },
-    data: { status },
+    data:  { status },
   });
 
-  // Mirror status to job
-  await mirrorToJob(rec.jobId, status);
+  await upsertUserJobStatus(userId, rec.jobId, status);
 
   return NextResponse.json({ id, status });
 }

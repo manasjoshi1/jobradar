@@ -275,6 +275,16 @@ export function JobBoardClient({
   const [showSyncHistory, setShowSyncHistory] = useState(false);
   const [loadingSyncHistory, setLoadingSyncHistory] = useState(false);
 
+  // Current user context
+  const [currentUser, setCurrentUser] = useState<{ id: string; name: string | null; email: string | null } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.user) setCurrentUser(d.user); })
+      .catch(() => {});
+  }, []);
+
   // Main tab
   const [mainTab, setMainTab] = useState<"jobs" | "recommended" | "alerts" | "history" | "sources">("jobs");
 
@@ -812,6 +822,12 @@ export function JobBoardClient({
               <p className="text-xs text-blue-300/60 mt-0.5">
                 {total.toLocaleString()} opportunities · {recCounts?.uniqueJobs?.last1d ?? 0} new jobs recommended today
               </p>
+              {currentUser && (
+                <p className="text-xs text-emerald-400/70 mt-0.5">
+                  👤 {currentUser.name ?? "Default User"}
+                  {currentUser.email ? ` · ${currentUser.email}` : ""}
+                </p>
+              )}
             </div>
             <div className="flex gap-2">
               <button

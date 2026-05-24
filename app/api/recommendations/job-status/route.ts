@@ -1,33 +1,19 @@
 /**
  * PATCH /api/recommendations/job-status
  *
- * Applies a status to ALL recommendation rows for a given jobId.
- * Used by the grouped UI so clicking "Skip" on a grouped job card updates
- * all matched-profile recommendations at once.
+ * Applies a status to ALL UserJobRecommendation rows for a given jobId (for default user).
+ * Also upserts UserJobStatus so the per-user job status is tracked separately.
  *
  * Body: { jobId: string, status: RecStatus }
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
 
 export const dynamic = "force-dynamic";
 
 type RecStatus = "UNSEEN" | "SEEN" | "SAVED" | "APPLIED" | "SKIPPED";
 const VALID = new Set<RecStatus>(["UNSEEN", "SEEN", "SAVED", "APPLIED", "SKIPPED"]);
-
-async function mirrorToJob(jobId: string, status: RecStatus) {
-  if (status === "SEEN" || status === "UNSEEN") return;
-  const job = await prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
-  if (!job || job.status === "APPLIED") return;
-
-  if (status === "APPLIED") {
-    await prisma.job.update({ where: { id: jobId }, data: { status: "APPLIED" } });
-  } else if (status === "SAVED" && job.status === "NEW") {
-    await prisma.job.update({ where: { id: jobId }, data: { status: "SAVED" } });
-  } else if (status === "SKIPPED" && (job.status === "NEW" || job.status === "SAVED")) {
-    await prisma.job.update({ where: { id: jobId }, data: { status: "SKIPPED" } });
-  }
-}
 
 export async function PATCH(request: NextRequest) {
   let jobId: string, status: RecStatus;
@@ -45,12 +31,36 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const result = await prisma.jobRecommendation.updateMany({
-    where: { jobId },
-    data: { status },
+  let userId: string;
+  try {
+    userId = await getDefaultUserId();
+  } catch {
+    return NextResponse.json({ error: "No default user" }, { status: 500 });
+  }
+
+  // Update all user's recommendations for this job
+  const result = await prisma.userJobRecommendation.updateMany({
+    where: { userId, jobId },
+    data:  { status },
   });
 
-  await mirrorToJob(jobId, status);
+  // Upsert UserJobStatus (skip for SEEN/UNSEEN)
+  if (status !== "SEEN" && status !== "UNSEEN") {
+    await prisma.userJobStatus.upsert({
+      where:  { userId_jobId: { userId, jobId } },
+      update: {
+        status,
+        appliedAt: status === "APPLIED" ? new Date() : undefined,
+        updatedAt: new Date(),
+      },
+      create: {
+        userId,
+        jobId,
+        status,
+        appliedAt: status === "APPLIED" ? new Date() : null,
+      },
+    });
+  }
 
   return NextResponse.json({ jobId, status, updated: result.count });
 }

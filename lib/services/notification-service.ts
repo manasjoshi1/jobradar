@@ -23,8 +23,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { groupRecommendations } from "@/lib/recommendation/group-recommendations";
-import type { GroupedJobRecommendation } from "@/lib/recommendation/group-recommendations";
+import { groupUserRecommendations } from "@/lib/recommendation/group-user-recommendations";
+import type { GroupedJobRecommendation } from "@/lib/recommendation/group-user-recommendations";
 
 export type NotifyOptions = {
   recommendationRunId?: string;
@@ -220,9 +220,17 @@ export async function sendRecommendationNotification(
     return;
   }
 
-  // ── Fetch all unnotified UNSEEN recommendations within lookback window ──────
-  const rawRecs = await prisma.jobRecommendation.findMany({
+  // ── Resolve default user ──────────────────────────────────────────────────
+  const defaultUser = await prisma.user.findFirst({ where: { isDefault: true }, select: { id: true } });
+  if (!defaultUser) {
+    console.warn("[notifications] No default user — skipping");
+    return;
+  }
+
+  // ── Fetch all unnotified UNSEEN user recommendations within lookback window ─
+  const rawRecs = await prisma.userJobRecommendation.findMany({
     where: {
+      userId:        defaultUser.id,
       notifiedAt:    null,
       status:        "UNSEEN",
       recommendedAt: { gte: lookback },
@@ -232,7 +240,7 @@ export async function sendRecommendationNotification(
     select: {
       id: true, score: true, reason: true, matched: true, negatives: true,
       status: true, recommendedAt: true,
-      roleProfile: { select: { id: true, name: true, priority: true, minScore: true } },
+      userRoleProfile: { select: { id: true, name: true, priority: true, minScore: true } },
       job: {
         select: {
           id: true, title: true, company: true, location: true,
@@ -245,7 +253,7 @@ export async function sendRecommendationNotification(
   });
 
   // ── Group by unique jobId ──────────────────────────────────────────────────
-  const grouped = groupRecommendations(rawRecs);
+  const grouped = groupUserRecommendations(rawRecs);
 
   if (grouped.length === 0) {
     await prisma.notificationDelivery.create({
@@ -310,7 +318,7 @@ export async function sendRecommendationNotification(
       },
     });
 
-    await prisma.jobRecommendation.updateMany({
+    await prisma.userJobRecommendation.updateMany({
       where: { id: { in: recIds } },
       data: {
         notifiedAt:             new Date(),

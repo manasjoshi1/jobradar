@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { groupRecommendations } from "@/lib/recommendation/group-recommendations";
+import { groupUserRecommendations } from "@/lib/recommendation/group-user-recommendations";
+import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
 import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -15,34 +16,43 @@ const VALID_STATUSES = new Set(["UNSEEN", "SEEN", "SAVED", "APPLIED", "SKIPPED"]
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
 
+  // Resolve user (default user for now — future: extract from session)
+  let userId: string;
+  try {
+    userId = await getDefaultUserId();
+  } catch {
+    return NextResponse.json({ error: "No default user. Run db:seed-user." }, { status: 500 });
+  }
+
   // Pagination
   const page     = Math.max(1, Number(sp.get("page")) || 1);
   const pageSize = Math.min(Math.max(1, Number(sp.get("pageSize")) || 25), 100);
   const skip     = (page - 1) * pageSize;
 
   // Filters
-  const windowParam    = sp.get("window") ?? "7d";
-  const windowHours    = WINDOW_MAP[windowParam] ?? 168;
-  const windowStart    = new Date(Date.now() - windowHours * 60 * 60 * 1000);
-  const statusParam    = sp.get("status") ?? "ALL";
-  const roleProfileId  = sp.get("roleProfileId") ?? "all";
+  const windowParam      = sp.get("window") ?? "7d";
+  const windowHours      = WINDOW_MAP[windowParam] ?? 168;
+  const windowStart      = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+  const statusParam      = sp.get("status") ?? "ALL";
+  const roleProfileId    = sp.get("roleProfileId") ?? "all"; // userRoleProfile.id
   const sponsorshipParam = sp.get("sponsorship") ?? "ANY";
-  const locationParam  = sp.get("location") ?? "";
-  const minScore       = Number(sp.get("minScore") ?? "0") || 0;
-  const groupByJob     = sp.get("groupByJob") !== "false"; // default true
+  const locationParam    = sp.get("location") ?? "";
+  const minScore         = Number(sp.get("minScore") ?? "0") || 0;
+  const groupByJob       = sp.get("groupByJob") !== "false";
 
   // Build where clause
-  const where: Prisma.JobRecommendationWhereInput = {
+  const where: Prisma.UserJobRecommendationWhereInput = {
+    userId,
     ...(windowParam !== "all" ? { recommendedAt: { gte: windowStart } } : {}),
   };
 
   if (statusParam !== "ALL" && VALID_STATUSES.has(statusParam)) {
     where.status = statusParam;
   }
-  if (roleProfileId !== "all") where.roleProfileId = roleProfileId;
+  if (roleProfileId !== "all") where.userRoleProfileId = roleProfileId;
   if (minScore > 0) where.score = { gte: minScore };
 
-  // Job-level sub-filter (sponsorship + location)
+  // Job-level sub-filter
   const jobFilter: Prisma.JobWhereInput = {};
   if (sponsorshipParam !== "ANY") jobFilter.sponsorship = sponsorshipParam;
   if (locationParam) {
@@ -76,14 +86,12 @@ export async function GET(request: NextRequest) {
 
   // ── Grouped mode (default) ────────────────────────────────────────────────
   if (groupByJob) {
-    // Fetch all matching recs (no DB-level pagination — group in memory, then paginate groups)
-    // We cap at a generous limit to avoid huge payloads; typical filter sets are small
-    const allRecs = await prisma.jobRecommendation.findMany({
+    const allRecs = await prisma.userJobRecommendation.findMany({
       where,
       orderBy: [{ score: "desc" }, { recommendedAt: "desc" }],
-      take: 2000, // safety cap
+      take: 2000,
       include: {
-        roleProfile: { select: { id: true, name: true, priority: true, minScore: true } },
+        userRoleProfile: { select: { id: true, name: true, priority: true, minScore: true } },
         job: {
           select: {
             id: true, title: true, company: true, location: true, department: true,
@@ -94,9 +102,9 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    const grouped = groupRecommendations(allRecs);
+    const grouped        = groupUserRecommendations(allRecs);
     const totalUniqueJobs = grouped.length;
-    const pagedGroups     = grouped.slice(skip, skip + pageSize);
+    const pagedGroups    = grouped.slice(skip, skip + pageSize);
 
     return NextResponse.json({
       jobs: pagedGroups,
@@ -109,14 +117,14 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // ── Flat mode (groupByJob=false) ──────────────────────────────────────────
+  // ── Flat mode ─────────────────────────────────────────────────────────────
   const [total, recommendations] = await Promise.all([
-    prisma.jobRecommendation.count({ where }),
-    prisma.jobRecommendation.findMany({
+    prisma.userJobRecommendation.count({ where }),
+    prisma.userJobRecommendation.findMany({
       where, skip, take: pageSize,
       orderBy: [{ recommendedAt: "desc" }, { score: "desc" }],
       include: {
-        roleProfile: { select: { id: true, name: true, priority: true, minScore: true } },
+        userRoleProfile: { select: { id: true, name: true, priority: true, minScore: true } },
         job: {
           select: {
             id: true, title: true, company: true, location: true, department: true,
@@ -134,11 +142,11 @@ export async function GET(request: NextRequest) {
       matched:   parseJsonArray(r.matched),
       negatives: parseJsonArray(r.negatives),
       status: r.status, recommendedAt: r.recommendedAt.toISOString(),
-      roleProfile: r.roleProfile,
+      roleProfile: r.userRoleProfile, // kept as "roleProfile" for UI compat
       job: {
         ...r.job,
-        postedAt:      r.job.postedAt?.toISOString() ?? null,
-        firstSeenAt:   r.job.firstSeenAt.toISOString(),
+        postedAt:       r.job.postedAt?.toISOString() ?? null,
+        firstSeenAt:    r.job.firstSeenAt.toISOString(),
         effectiveNewAt: r.job.effectiveNewAt?.toISOString() ?? null,
       },
     })),

@@ -16,7 +16,9 @@
     "runs:recover": "node scripts/recover-abandoned-runs.mjs",
     "deploy:bootstrap": "node scripts/deploy-bootstrap.mjs",
     "db:seed-user": "node scripts/seed-default-user.mjs",
-    "db:investigate": "node scripts/investigate-duplicates.mjs"
+    "db:investigate": "node scripts/investigate-duplicates.mjs",
+    "users:migrate-default": "node scripts/migrate-default-user.mjs",
+    "users:import-config": "node scripts/import-user-config.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

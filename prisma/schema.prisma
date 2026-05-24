@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GLOBAL TABLES (job ingestion layer — shared across all users)
+// ─────────────────────────────────────────────────────────────────────────────
+
 model JobSource {
   id             String    @id @default(cuid())
   company        String
@@ -42,14 +46,20 @@ model Job {
   jobFingerprint String?
 
   sponsorship String @default("UNKNOWN")
+  /// Legacy global status — preserved for backward compat; prefer UserJobStatus
   status      String @default("NEW")
 
   firstSeenAt DateTime @default(now())
   lastSeenAt  DateTime @default(now())
   isActive    Boolean  @default(true)
 
-  source          JobSource           @relation(fields: [sourceId], references: [id])
-  recommendations JobRecommendation[]
+  source              JobSource              @relation(fields: [sourceId], references: [id])
+  /// Legacy global recommendations — preserved for backward compat
+  recommendations     JobRecommendation[]
+  /// Per-user recommendations (new)
+  userRecommendations UserJobRecommendation[]
+  /// Per-user status (new)
+  userStatuses        UserJobStatus[]
 
   @@unique([sourceId, applyUrl])
   @@index([isActive])
@@ -98,6 +108,11 @@ model SyncSourceRun {
   syncRun SyncRun @relation(fields: [syncRunId], references: [id])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LEGACY GLOBAL RECOMMENDATION TABLES
+// Kept for backward compat — new runs write to UserJobRecommendation instead
+// ─────────────────────────────────────────────────────────────────────────────
+
 model RoleProfile {
   id       String  @id @default(cuid())
   name     String  @unique
@@ -132,7 +147,6 @@ model JobRecommendation {
   status        String    @default("UNSEEN") // UNSEEN, SEEN, SAVED, APPLIED, SKIPPED
   recommendedAt DateTime  @default(now())
 
-  /// Set when this recommendation was included in a notification delivery
   notifiedAt             DateTime?
   notificationDeliveryId String?
 
@@ -183,7 +197,9 @@ model NotificationDelivery {
   @@index([recommendationRunId])
 }
 
-// ── User foundation (single-tenant for now, multi-user ready) ────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// USER LAYER — per-user data, preferences, recommendations, history
+// ─────────────────────────────────────────────────────────────────────────────
 
 model User {
   id        String   @id @default(cuid())
@@ -194,8 +210,127 @@ model User {
   updatedAt DateTime @updatedAt
 
   notificationPreferences UserNotificationPreference[]
+  roleProfiles            UserRoleProfile[]
+  jobStatuses             UserJobStatus[]
+  recommendations         UserJobRecommendation[]
+  recommendationRuns      UserRecommendationRun[]
+  preferences             UserJobPreference?
 
   @@index([isDefault])
+}
+
+model UserRoleProfile {
+  id     String @id @default(cuid())
+  userId String
+
+  name     String
+  enabled  Boolean @default(true)
+  priority Int     @default(0)
+
+  preferredTitles    String // JSON array
+  preferredLocations String // JSON array
+  mustHaveKeywords   String // JSON array
+  niceHaveKeywords   String // JSON array
+  negativeKeywords   String // JSON array
+
+  requiresSponsorship Boolean @default(false)
+  minScore            Int     @default(50)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            User                   @relation(fields: [userId], references: [id])
+  recommendations UserJobRecommendation[]
+
+  @@unique([userId, name])
+  @@index([userId, enabled])
+}
+
+model UserJobPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  targetLocations    String? // JSON array
+  targetRoles        String? // JSON array
+  blockedCompanies   String? // JSON array
+  preferredCompanies String? // JSON array
+
+  minScore            Int     @default(45)
+  requiresSponsorship Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model UserJobStatus {
+  id     String @id @default(cuid())
+  userId String
+  jobId  String
+
+  status    String    @default("NEW") // NEW, SAVED, APPLIED, SKIPPED
+  notes     String?
+  appliedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+  job  Job  @relation(fields: [jobId], references: [id])
+
+  @@unique([userId, jobId])
+  @@index([userId, status])
+  @@index([userId, updatedAt])
+}
+
+model UserJobRecommendation {
+  id                String @id @default(cuid())
+  userId            String
+  jobId             String
+  userRoleProfileId String
+
+  score     Int
+  reason    String?
+  matched   String // JSON array
+  negatives String // JSON array
+
+  status        String    @default("UNSEEN") // UNSEEN, SEEN, SAVED, APPLIED, SKIPPED
+  recommendedAt DateTime  @default(now())
+
+  notifiedAt             DateTime?
+  notificationDeliveryId String?
+
+  user            User            @relation(fields: [userId], references: [id])
+  job             Job             @relation(fields: [jobId], references: [id])
+  userRoleProfile UserRoleProfile @relation(fields: [userRoleProfileId], references: [id])
+
+  @@unique([userId, jobId, userRoleProfileId])
+  @@index([userId, status, recommendedAt])
+  @@index([userId, notifiedAt])
+  @@index([userId, recommendedAt])
+}
+
+model UserRecommendationRun {
+  id     String @id @default(cuid())
+  userId String
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String // RUNNING, SUCCESS, PARTIAL_FAILURE, FAILED
+
+  windowStart DateTime
+  windowEnd   DateTime
+
+  jobsScanned            Int     @default(0)
+  recommendationsCreated Int     @default(0)
+  recommendationsUpdated Int     @default(0)
+  errorSummary           String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, startedAt])
+  @@index([userId, status])
 }
 
 model UserNotificationPreference {
@@ -210,11 +345,8 @@ model UserNotificationPreference {
   telegramChatId    String?
   discordWebhookUrl String?
 
-  /// How far back to look for unnotified recommendations
   lookbackHours     Int @default(24)
-  /// Max unique jobs per notification message
   maxJobs           Int @default(10)
-  /// Max jobs from same company in one notification
   maxJobsPerCompany Int @default(2)
 
   createdAt DateTime @default(now())

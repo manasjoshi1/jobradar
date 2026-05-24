@@ -1,19 +1,28 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const profiles = await prisma.roleProfile.findMany({
+  let userId: string;
+  try {
+    userId = await getDefaultUserId();
+  } catch {
+    // Fall back to global role profiles if no user yet
+    const profiles = await prisma.roleProfile.findMany({
+      orderBy: [{ priority: "desc" }, { name: "asc" }],
+      select: { id: true, name: true, enabled: true, priority: true, minScore: true, requiresSponsorship: true },
+    });
+    return NextResponse.json({ profiles });
+  }
+
+  // Return user's role profiles
+  const profiles = await prisma.userRoleProfile.findMany({
+    where:   { userId },
     orderBy: [{ priority: "desc" }, { name: "asc" }],
-    select: {
-      id: true,
-      name: true,
-      enabled: true,
-      priority: true,
-      minScore: true,
-      requiresSponsorship: true,
-    },
+    select:  { id: true, name: true, enabled: true, priority: true, minScore: true, requiresSponsorship: true },
   });
+
   return NextResponse.json({ profiles });
 }
