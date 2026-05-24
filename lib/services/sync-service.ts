@@ -273,10 +273,28 @@ async function syncSource(
 export async function runSync(existingSyncRunId?: string): Promise<SyncResult> {
   const startMs = Date.now();
 
-  const sources = await prisma.jobSource.findMany({
-    where: { enabled: true },
-    orderBy: [{ provider: "asc" }, { company: "asc" }],
-  });
+  // Check if any user has UserJobSource preferences
+  const userSourceCount = await prisma.userJobSource.count();
+  let sources: JobSource[];
+  if (userSourceCount > 0) {
+    // At least one user has source preferences — sync only user-selected enabled sources
+    const userSourceIds = await prisma.userJobSource.findMany({
+      where: { enabled: true },
+      select: { sourceId: true },
+      distinct: ["sourceId"],
+    });
+    const sourceIdSet = new Set(userSourceIds.map((u) => u.sourceId));
+    sources = await prisma.jobSource.findMany({
+      where: { enabled: true, id: { in: [...sourceIdSet] } },
+      orderBy: [{ provider: "asc" }, { company: "asc" }],
+    });
+  } else {
+    // Fallback: sync all enabled global sources
+    sources = await prisma.jobSource.findMany({
+      where: { enabled: true },
+      orderBy: [{ provider: "asc" }, { company: "asc" }],
+    });
+  }
 
   const syncRunId =
     existingSyncRunId ??
