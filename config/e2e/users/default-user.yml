@@ -1,0 +1,107 @@
+user:
+  name: Default User
+  email: "e2e@jobradar.test"
+  isDefault: true
+
+preferences:
+  targetLocations:
+    - remote
+    - united states
+    - new york
+    - san francisco
+    - chicago
+    - hybrid
+  targetRoles:
+    - backend engineer
+    - software engineer
+    - java developer
+    - platform engineer
+    - full stack engineer
+    - payments engineer
+  blockedCompanies: []
+  preferredCompanies:
+    - Stripe
+    - Datadog
+  requiresSponsorship: false
+  minScore: 40
+
+roleProfiles:
+  - name: "Backend Java / Spring / AWS"
+    enabled: true
+    priority: 10
+    minScore: 45
+    requiresSponsorship: false
+    preferredTitles:
+      - Backend Engineer
+      - Software Engineer
+      - Java Engineer
+      - Java Developer
+      - Platform Engineer
+    preferredLocations:
+      - remote
+      - united states
+      - hybrid
+    mustHaveKeywords:
+      - java
+      - spring
+    niceHaveKeywords:
+      - aws
+      - kubernetes
+      - microservices
+      - kafka
+    negativeKeywords:
+      - wordpress
+      - php
+      - intern
+      - junior
+
+  - name: "Full Stack React + Backend"
+    enabled: true
+    priority: 8
+    minScore: 45
+    requiresSponsorship: false
+    preferredTitles:
+      - Full Stack Engineer
+      - Software Engineer
+      - Full Stack Developer
+    preferredLocations:
+      - remote
+      - united states
+      - hybrid
+    mustHaveKeywords:
+      - react
+      - typescript
+    niceHaveKeywords:
+      - node
+      - nextjs
+      - postgres
+      - graphql
+    negativeKeywords:
+      - wordpress
+      - php
+      - intern
+
+  - name: "Payments / Platform Engineer"
+    enabled: true
+    priority: 9
+    minScore: 45
+    requiresSponsorship: false
+    preferredTitles:
+      - Payments Engineer
+      - Platform Engineer
+      - Software Engineer
+    preferredLocations:
+      - remote
+      - united states
+      - hybrid
+    mustHaveKeywords:
+      - payments
+    niceHaveKeywords:
+      - stripe
+      - fintech
+      - api
+      - distributed systems
+    negativeKeywords:
+      - wordpress
+      - php
+      - intern

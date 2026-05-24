@@ -1,0 +1,21 @@
+# E2E test job sources — tiny set, no real external fetching needed.
+# The e2e-seed.mjs script inserts Job rows directly, bypassing real sync.
+
+sources:
+  - company: "Acme Corp"
+    provider: "greenhouse"
+    boardToken: "acmecorp-e2e"
+    url: "https://boards.greenhouse.io/acmecorp-e2e"
+    enabled: true
+
+  - company: "Beta Inc"
+    provider: "lever"
+    boardToken: "betainc-e2e"
+    url: "https://jobs.lever.co/betainc-e2e"
+    enabled: true
+
+  - company: "Gamma Ltd"
+    provider: "ashby"
+    boardToken: "gammaltd-e2e"
+    url: "https://jobs.ashbyhq.com/gammaltd-e2e"
+    enabled: true
