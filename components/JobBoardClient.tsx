@@ -141,6 +141,11 @@ type SyncRunDetail = SyncRunRow & {
   sourceRuns: SyncSourceRunItem[];
   failedSources: Array<{ id: string; company: string | null; provider: string | null; errorMessage: string | null; }>;
 };
+type LiveSyncStatus = {
+  id: string; status: string; startedAt: string; finishedAt: string | null;
+  sourcesProcessed: number; sourcesSucceeded: number; sourcesFailed: number;
+  jobsCreated: number; jobsUpdated: number; jobsMarkedStale: number; durationMs: number;
+};
 type RecRunRow = {
   id: string; startedAt: string; finishedAt: string | null; status: string;
   windowHours: number; jobsScanned: number; recommendationsCreated: number;
@@ -275,6 +280,12 @@ export function JobBoardClient({
   // Sources tab state
   const [sourceHealth, setSourceHealth] = useState<SourceHealthRow[]>([]);
   const [sourceHealthLoading, setSourceHealthLoading] = useState(false);
+
+  // Live sync progress state
+  const [liveSyncRunId, setLiveSyncRunId] = useState<string | null>(null);
+  const [liveSyncData, setLiveSyncData] = useState<LiveSyncStatus | null>(null);
+  const [liveSyncStarting, setLiveSyncStarting] = useState(false);
+  const [liveSyncError, setLiveSyncError] = useState<string | null>(null);
 
   // Timeline modal state
   const [timelineJobId, setTimelineJobId] = useState<string | null>(null);
@@ -441,6 +452,46 @@ export function JobBoardClient({
       .then((d) => setSourceHealth(d.sources))
       .catch(console.error)
       .finally(() => setSourceHealthLoading(false));
+  };
+
+  const startLiveSync = async () => {
+    setLiveSyncStarting(true);
+    setLiveSyncError(null);
+    setLiveSyncData(null);
+    setLiveSyncRunId(null);
+    try {
+      const res = await fetch("/api/sync/start", { method: "POST" });
+      const body = await res.json() as { runId?: string; error?: string };
+      if (!res.ok) {
+        setLiveSyncError(body.error ?? `HTTP ${res.status}`);
+        setLiveSyncStarting(false);
+        return;
+      }
+      const runId = body.runId!;
+      setLiveSyncRunId(runId);
+      setLiveSyncStarting(false);
+
+      // Poll every 2s until done
+      const poll = async () => {
+        try {
+          const statusRes = await fetch(`/api/sync/status?runId=${runId}`);
+          const data = await statusRes.json() as LiveSyncStatus;
+          setLiveSyncData(data);
+          if (data.status === "RUNNING") {
+            setTimeout(poll, 2000);
+          } else {
+            // Refresh history list now that it's done
+            fetchSyncRuns(1);
+          }
+        } catch {
+          setTimeout(poll, 3000);
+        }
+      };
+      setTimeout(poll, 1000);
+    } catch (err) {
+      setLiveSyncError(err instanceof Error ? err.message : "Failed to start sync");
+      setLiveSyncStarting(false);
+    }
   };
 
   const openTimeline = (jobId: string) => {
@@ -1378,7 +1429,52 @@ export function JobBoardClient({
 
             {/* ── Sync Runs ── */}
             {historySubTab === "sync" && (
-              <div>
+              <div className="space-y-4">
+                {/* Live sync trigger + progress card */}
+                <div className="rounded-xl border border-blue-500/20 bg-slate-800/50 p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-blue-200">Manual Sync</span>
+                    <button
+                      onClick={startLiveSync}
+                      disabled={liveSyncStarting || liveSyncData?.status === "RUNNING"}
+                      className="px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-500/20 border border-blue-500/40 text-blue-200 hover:bg-blue-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      {liveSyncStarting ? "Starting…" : liveSyncData?.status === "RUNNING" ? "⏳ Running…" : "🔄 Start Sync"}
+                    </button>
+                  </div>
+                  {liveSyncError && (
+                    <p className="text-red-400 text-sm">{liveSyncError}</p>
+                  )}
+                  {liveSyncData && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                      <div className="bg-slate-900/50 rounded-lg p-3">
+                        <div className="text-blue-300/60 text-xs mb-1">Status</div>
+                        <RunStatusBadge status={liveSyncData.status} startedAt={liveSyncData.startedAt} />
+                      </div>
+                      <div className="bg-slate-900/50 rounded-lg p-3">
+                        <div className="text-blue-300/60 text-xs mb-1">Sources</div>
+                        <span className="font-semibold text-white">
+                          {liveSyncData.sourcesSucceeded ?? 0}/{liveSyncData.sourcesProcessed ?? "?"}
+                          {(liveSyncData.sourcesFailed ?? 0) > 0 && (
+                            <span className="text-red-400 ml-1">({liveSyncData.sourcesFailed} failed)</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="bg-slate-900/50 rounded-lg p-3">
+                        <div className="text-blue-300/60 text-xs mb-1">Jobs</div>
+                        <span className="font-semibold text-white">+{liveSyncData.jobsCreated ?? 0} new</span>
+                      </div>
+                      <div className="bg-slate-900/50 rounded-lg p-3">
+                        <div className="text-blue-300/60 text-xs mb-1">Elapsed</div>
+                        <span className="font-semibold text-white">{((liveSyncData.durationMs ?? 0) / 1000).toFixed(1)}s</span>
+                      </div>
+                    </div>
+                  )}
+                  {!liveSyncData && !liveSyncError && (
+                    <p className="text-blue-300/40 text-xs">Click &ldquo;Start Sync&rdquo; to fetch all job sources in parallel.</p>
+                  )}
+                </div>
+
                 {syncRunsLoading ? (
                   <p className="text-blue-300 text-center py-10">Loading…</p>
                 ) : syncRuns.length === 0 ? (

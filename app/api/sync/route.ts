@@ -1,27 +1,16 @@
+/**
+ * GET /api/sync  (legacy — synchronous, waits for completion)
+ * POST /api/sync (legacy — synchronous, waits for completion)
+ *
+ * For non-blocking sync prefer:
+ *   POST /api/sync/start  → returns { runId }
+ *   GET  /api/sync/status?runId=<id> → poll for progress
+ */
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { fetchJobsFromSource } from "@/lib/providers";
-import { detectSponsorship } from "@/lib/sponsorship";
 import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
+import { runSync } from "@/lib/services/sync-service";
 
 export const dynamic = "force-dynamic";
-
-type SyncError = {
-  sourceId: string;
-  company: string;
-  provider: string;
-  message: string;
-};
-
-type SyncSummary = {
-  sourcesProcessed: number;
-  sourcesSucceeded: number;
-  sourcesFailed: number;
-  jobsCreated: number;
-  jobsUpdated: number;
-  jobsMarkedStale: number;
-  errors: SyncError[];
-};
 
 export async function GET() {
   return syncJobs();
@@ -32,250 +21,12 @@ export async function POST() {
 }
 
 async function syncJobs() {
-  // Recover any runs stuck RUNNING from previous crashes/restarts before starting new one
   await recoverAbandonedRuns(30);
-
-  const sources = await prisma.jobSource.findMany({
-    where: { enabled: true },
-    orderBy: [{ provider: "asc" }, { company: "asc" }],
-  });
-
-  const summary: SyncSummary = {
-    sourcesProcessed: sources.length,
-    sourcesSucceeded: 0,
-    sourcesFailed: 0,
-    jobsCreated: 0,
-    jobsUpdated: 0,
-    jobsMarkedStale: 0,
-    errors: [],
-  };
-  const syncRun = await prisma.syncRun.create({
-    data: {
-      status: "RUNNING",
-      sourcesProcessed: sources.length,
-    },
-  });
-
   try {
-  for (const source of sources) {
-    const sourceRun = await prisma.syncSourceRun.create({
-      data: {
-        syncRunId: syncRun.id,
-        sourceId: source.id,
-        company: source.company,
-        provider: source.provider,
-        status: "SKIPPED",
-      },
-    });
-
-    try {
-      const jobs = await fetchJobsFromSource(source);
-      let sourceJobsCreated = 0;
-      let sourceJobsUpdated = 0;
-      const seenApplyUrls = new Set<string>();
-
-      for (const job of jobs) {
-        seenApplyUrls.add(job.applyUrl);
-        const existing = await prisma.job.findUnique({
-          where: {
-            sourceId_applyUrl: {
-              sourceId: source.id,
-              applyUrl: job.applyUrl,
-            },
-          },
-          select: { id: true },
-        });
-
-        const sponsorship = detectSponsorship(
-          [job.title, job.description, job.location, job.department]
-            .filter(Boolean)
-            .join(" "),
-        );
-        const now = new Date();
-        const postedAt = job.postedAt ? new Date(job.postedAt) : null;
-
-        // effectiveNewAt = postedAt if provider gives it, else firstSeenAt (now for new jobs)
-        const effectiveNewAt = postedAt ?? now;
-
-        // For existing jobs: only update effectiveNewAt if we now have a real postedAt
-        // and effectiveNewAt was previously null or was set to firstSeenAt (no real postedAt before)
-        const existingFull = existing
-          ? await prisma.job.findUnique({
-              where: { sourceId_applyUrl: { sourceId: source.id, applyUrl: job.applyUrl } },
-              select: { effectiveNewAt: true, postedAt: true, firstSeenAt: true },
-            })
-          : null;
-
-        const updatedEffectiveNewAt =
-          postedAt && existingFull && !existingFull.postedAt
-            ? postedAt // we now have a real postedAt — update effectiveNewAt
-            : existingFull
-              ? undefined // already set correctly — don't change
-              : effectiveNewAt; // new job — set it
-
-        await prisma.job.upsert({
-          where: {
-            sourceId_applyUrl: {
-              sourceId: source.id,
-              applyUrl: job.applyUrl,
-            },
-          },
-          create: {
-            sourceId: source.id,
-            externalId: job.externalId || null,
-            company: job.company,
-            title: job.title,
-            location: job.location || null,
-            department: job.department || null,
-            employmentType: job.employmentType || null,
-            applyUrl: job.applyUrl,
-            description: job.description || null,
-            postedAt,
-            effectiveNewAt,
-            sponsorship,
-            status: "NEW",
-            firstSeenAt: now,
-            lastSeenAt: now,
-            isActive: true,
-          },
-          // User status must survive re-sync. Do not update status or firstSeenAt here.
-          update: {
-            externalId: job.externalId || null,
-            company: job.company,
-            title: job.title,
-            location: job.location || null,
-            department: job.department || null,
-            employmentType: job.employmentType || null,
-            description: job.description || null,
-            postedAt,
-            ...(updatedEffectiveNewAt !== undefined
-              ? { effectiveNewAt: updatedEffectiveNewAt }
-              : {}),
-            sponsorship,
-            lastSeenAt: now,
-            isActive: true,
-          },
-        });
-
-        if (existing) {
-          summary.jobsUpdated += 1;
-          sourceJobsUpdated += 1;
-        } else {
-          summary.jobsCreated += 1;
-          sourceJobsCreated += 1;
-        }
-      }
-
-      const staleResult =
-        seenApplyUrls.size > 0
-          ? await prisma.job.updateMany({
-              where: {
-                sourceId: source.id,
-                applyUrl: { notIn: [...seenApplyUrls] },
-                isActive: true,
-              },
-              data: { isActive: false },
-            })
-          : await prisma.job.updateMany({
-              where: {
-                sourceId: source.id,
-                isActive: true,
-              },
-              data: { isActive: false },
-            });
-      summary.jobsMarkedStale += staleResult.count;
-
-      await prisma.jobSource.update({
-        where: { id: source.id },
-        data: {
-          lastSyncAt: new Date(),
-          lastSyncStatus: `OK: ${jobs.length} jobs`,
-        },
-      });
-      await prisma.syncSourceRun.update({
-        where: { id: sourceRun.id },
-        data: {
-          status: "SUCCESS",
-          jobsFetched: jobs.length,
-          jobsCreated: sourceJobsCreated,
-          jobsUpdated: sourceJobsUpdated,
-          finishedAt: new Date(),
-        },
-      });
-
-      summary.sourcesSucceeded += 1;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown source sync error";
-
-      await prisma.jobSource.update({
-        where: { id: source.id },
-        data: {
-          lastSyncAt: new Date(),
-          lastSyncStatus: `ERROR: ${message.slice(0, 240)}`,
-        },
-      });
-      await prisma.syncSourceRun.update({
-        where: { id: sourceRun.id },
-        data: {
-          status: "FAILED",
-          errorMessage: truncate(message, 1_000),
-          finishedAt: new Date(),
-        },
-      });
-
-      summary.sourcesFailed += 1;
-      summary.errors.push({
-        sourceId: source.id,
-        company: source.company,
-        provider: source.provider,
-        message,
-      });
-    }
+    const result = await runSync();
+    return NextResponse.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const status =
-    summary.sourcesFailed === 0
-      ? "SUCCESS"
-      : summary.sourcesSucceeded === 0
-        ? "FAILED"
-        : "PARTIAL_FAILURE";
-
-  await prisma.syncRun.update({
-    where: { id: syncRun.id },
-    data: {
-      finishedAt: new Date(),
-      status,
-      sourcesProcessed: summary.sourcesProcessed,
-      sourcesSucceeded: summary.sourcesSucceeded,
-      sourcesFailed: summary.sourcesFailed,
-      jobsCreated: summary.jobsCreated,
-      jobsUpdated: summary.jobsUpdated,
-      jobsMarkedStale: summary.jobsMarkedStale,
-      errorSummary: summary.errors.length
-        ? truncate(
-            summary.errors
-              .slice(0, 10)
-              .map((error) => `${error.company}: ${error.message}`)
-              .join("\n"),
-            2_000,
-          )
-        : null,
-    },
-  });
-  } catch (fatalError) {
-    // Unexpected failure outside source loop — finalize run as FAILED so it doesn't stay RUNNING
-    const msg = fatalError instanceof Error ? fatalError.message : String(fatalError);
-    await prisma.syncRun.update({
-      where: { id: syncRun.id },
-      data: { status: "FAILED", finishedAt: new Date(), errorSummary: truncate(msg, 2_000) },
-    }).catch(() => { /* best effort */ });
-    throw fatalError;
-  }
-
-  return NextResponse.json(summary);
-}
-
-function truncate(value: string, maxLength: number) {
-  return value.length > maxLength ? value.slice(0, maxLength) : value;
 }
