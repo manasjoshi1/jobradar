@@ -1,6 +1,11 @@
 /**
- * E2E — Profile Config API
- * Smoke-tests the editable config endpoints.
+ * E2E — Profile Config API + UI import path
+ *
+ * Smoke-tests:
+ *  - Config status API shape
+ *  - Preferences PATCH
+ *  - Role profile POST (create + soft-delete)
+ *  - YAML import via UI (upload/import path, not just API smoke)
  */
 import { test, expect } from "@playwright/test";
 import { loginViaApi } from "./helpers";
@@ -8,6 +13,8 @@ import { loginViaApi } from "./helpers";
 test.beforeEach(async ({ page }) => {
   await loginViaApi(page);
 });
+
+// ── API smoke ─────────────────────────────────────────────────────────────────
 
 test("GET /api/profile/config/status returns valid shape", async ({ page }) => {
   const res = await page.request.get("/api/profile/config/status");
@@ -25,12 +32,12 @@ test("GET /api/profile/config/status returns valid shape", async ({ page }) => {
 });
 
 test("PATCH /api/profile/preferences updates minScore", async ({ page }) => {
-  // First get current
+  // Get current
   const statusRes = await page.request.get("/api/profile/config/status");
   const status = await statusRes.json() as { preferences?: { minScore?: number } };
   const originalScore = status.preferences?.minScore ?? 45;
 
-  // Update
+  // Update to a different value
   const newScore = originalScore === 50 ? 55 : 50;
   const patchRes = await page.request.patch("/api/profile/preferences", {
     data: { minScore: newScore },
@@ -39,7 +46,7 @@ test("PATCH /api/profile/preferences updates minScore", async ({ page }) => {
   const updated = await patchRes.json() as { minScore?: number };
   expect(updated.minScore).toBe(newScore);
 
-  // Restore
+  // Restore original
   await page.request.patch("/api/profile/preferences", {
     data: { minScore: originalScore },
   });
@@ -63,18 +70,70 @@ test("POST /api/profile/role-profiles creates a profile", async ({ page }) => {
   const created = await createRes.json() as { id?: string; name?: string };
   expect(created.name).toBe("E2E Test Profile");
 
-  // Clean up — soft delete
+  // Soft-delete to clean up
   if (created.id) {
     await page.request.delete(`/api/profile/role-profiles/${created.id}`);
   }
 });
 
+// ── UI import path ────────────────────────────────────────────────────────────
+
+test("YAML import via UI successfully imports user preferences", async ({ page }) => {
+  await page.goto("/");
+
+  // Open Profile tab
+  await page.getByRole("button", { name: /👤 Profile/i }).click();
+
+  // Wait for ProfileConfigPanel to load — "Import / Export" sub-tab button appears after loading
+  await expect(page.getByRole("button", { name: "Import / Export" })).toBeVisible({ timeout: 12_000 });
+
+  // Navigate to Import/Export sub-tab
+  await page.getByRole("button", { name: "Import / Export" }).click();
+
+  // Paste a minimal user-preferences YAML
+  const testYaml = [
+    "preferences:",
+    "  minScore: 43",
+    "  requiresSponsorship: false",
+    "  targetLocations:",
+    "    - remote",
+    "    - united states",
+    "  targetRoles:",
+    "    - software engineer",
+    "    - backend engineer",
+    "  blockedCompanies: []",
+    "  preferredCompanies: []",
+  ].join("\n");
+
+  // The paste textarea is the YAML input
+  const yamlTextarea = page.locator("textarea").last();
+  await yamlTextarea.fill(testYaml);
+
+  // Make sure "User Profile" import type is selected (it's the default)
+  await page.getByRole("button", { name: "User Profile" }).click();
+
+  // Click Import button (exact match to avoid hitting "Importing…" disabled variant)
+  await page.getByRole("button", { name: /^Import$/ }).click();
+
+  // Should show success
+  await expect(page.getByText("Import successful")).toBeVisible({ timeout: 10_000 });
+
+  // Verify via API that preferences were actually updated
+  const statusRes = await page.request.get("/api/profile/config/status");
+  expect(statusRes.status()).toBe(200);
+  const body = await statusRes.json() as { preferences?: { minScore?: number } };
+  expect(body.preferences?.minScore).toBe(43);
+
+  // Restore original seed value
+  await page.request.patch("/api/profile/preferences", { data: { minScore: 40 } });
+});
+
+// ── Profile UI accessibility ──────────────────────────────────────────────────
+
 test("Profile config UI tab is accessible", async ({ page }) => {
   await page.goto("/");
-  // Click the Profile tab
-  const profileTab = page.getByRole("button", { name: /profile/i });
+  const profileTab = page.getByRole("button", { name: /👤 Profile/i });
   await expect(profileTab).toBeVisible({ timeout: 10_000 });
   await profileTab.click();
-  // Should show some config content
   await expect(page.locator("main")).toBeVisible();
 });

@@ -68,6 +68,15 @@ test("profile tab loads and shows user name", async ({ page }) => {
 test("profile tab shows role profiles", async ({ page }) => {
   await page.getByRole("button", { name: PROFILE_TAB_NAME }).click();
 
+  // ProfileConfigPanel fetches async — wait for the sub-tab buttons to appear.
+  // The "Role Profiles (N/N)" button appears only after loading completes.
+  const roleProfilesSubTab = page.getByRole("button", { name: /Role Profiles \(/ });
+  await expect(roleProfilesSubTab).toBeVisible({ timeout: 12_000 });
+
+  // Click into the Role Profiles sub-tab
+  await roleProfilesSubTab.click();
+
+  // Seeded role profile names should now be visible
   await expect(page.getByText(/Backend Java/i)).toBeVisible({ timeout: 8_000 });
   await expect(page.getByText(/Full Stack React/i)).toBeVisible({ timeout: 8_000 });
   await expect(page.getByText(/Payments.*Platform/i)).toBeVisible({ timeout: 8_000 });
@@ -76,6 +85,12 @@ test("profile tab shows role profiles", async ({ page }) => {
 test("profile tab shows job preferences (min score)", async ({ page }) => {
   await page.getByRole("button", { name: PROFILE_TAB_NAME }).click();
 
-  // Min score was set to 40 in the seed
-  await expect(page.getByText("40")).toBeVisible({ timeout: 8_000 });
+  // ProfileConfigPanel default tab is Preferences — wait for its content to load.
+  // The "Min Score (0–100)" label appears once loading completes.
+  await expect(page.getByText(/Min Score/i)).toBeVisible({ timeout: 12_000 });
+
+  // Min score is an <input type="number"> seeded at 40 — check via input value
+  const minScoreInput = page.locator('input[type="number"]').first();
+  await expect(minScoreInput).toBeVisible({ timeout: 5_000 });
+  await expect(minScoreInput).toHaveValue("40");
 });
