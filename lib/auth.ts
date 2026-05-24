@@ -59,12 +59,16 @@ export async function getSession(): Promise<SessionPayload | null> {
 }
 
 export function sessionCookieOptions(token: string) {
+  // Only set Secure flag when explicitly opted in (i.e. you have TLS).
+  // NODE_ENV=production on plain HTTP (port 80) causes browsers to silently
+  // drop the cookie on every subsequent request, breaking post-login redirects.
+  const secure = process.env.COOKIE_SECURE === "true";
   return {
     name:     COOKIE_NAME,
     value:    token,
     httpOnly: true,
     sameSite: "lax" as const,
-    secure:   process.env.NODE_ENV === "production",
+    secure,
     maxAge:   SESSION_DURATION_SECONDS,
     path:     "/",
   };
