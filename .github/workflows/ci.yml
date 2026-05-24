@@ -124,3 +124,79 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           # Dockerfile sets NODE_ENV=production in the runner stage directly
+
+  # ── Job 3: Deploy to EC2 ─────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Both CI jobs must be green before we touch production
+    needs: [test, docker-build]
+
+    # Only deploy on push events — never on pull_request
+    # (pull_request events from forks don't have access to secrets anyway,
+    #  but the explicit guard makes intent clear and prevents accidental deploys)
+    if: github.event_name == 'push'
+
+    environment:
+      name: production
+      url: http://${{ secrets.EC2_HOST }}
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host:     ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          # Abort the entire script on the first failing command
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            APP_DIR="${{ secrets.EC2_APP_DIR }}"
+            echo "==> Deploying to $APP_DIR"
+            cd "$APP_DIR"
+
+            # ── 1. Pull latest code ──────────────────────────────────────────
+            # git reset --hard is safe: .env and data/ are not tracked by git.
+            # The SQLite volume (./data) and secrets (.env) are never touched.
+            echo "==> Fetching latest code..."
+            git fetch origin
+            git reset --hard FETCH_HEAD
+
+            # ── 2. Rebuild image and restart container ───────────────────────
+            echo "==> Building Docker image and restarting container..."
+            docker compose up --build -d
+
+            # ── 3. Wait for container to initialise ──────────────────────────
+            echo "==> Waiting 15 s for container to become ready..."
+            sleep 15
+
+            # ── 4. Run idempotent bootstrap (migrations, config, backfill) ───
+            echo "==> Running deploy bootstrap..."
+            docker compose exec -T jobradar npm run deploy:bootstrap
+
+            # ── 5. Confirm container is running ──────────────────────────────
+            echo "==> Container status:"
+            docker compose ps
+
+            # ── 6. Health checks ─────────────────────────────────────────────
+            # /api/auth/me returns 401 when unauthenticated — that's expected
+            # and still proves the Next.js server is alive and routing correctly.
+            echo "==> Health check: Next.js API..."
+            curl -sf http://localhost/api/auth/me \
+              -o /dev/null -w "HTTP %{http_code}\n" || true
+
+            echo "==> Health check: nginx / root..."
+            curl -sf http://localhost -o /dev/null -w "HTTP %{http_code}\n"
+
+            # Hard fail if the root returns a non-2xx/3xx (nginx is down)
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost)
+            if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 500 ]; then
+              echo "ERROR: health check failed — HTTP $HTTP_CODE"
+              exit 1
+            fi
+
+            echo "==> Deploy complete! HTTP $HTTP_CODE"
