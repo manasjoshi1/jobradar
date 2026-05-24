@@ -108,9 +108,10 @@ test("GET /api/recommendations?groupByJob=true returns 200", async ({ playwright
   const ctx = await authedCtx(playwright);
   const res = await ctx.get("/api/recommendations?groupByJob=true&window=7d");
   expect(res.status()).toBe(200);
-  const body = await res.json() as { recommendations?: unknown[]; total?: number };
-  expect(Array.isArray(body.recommendations)).toBe(true);
-  // We seeded jobs that should produce recommendations
+  // With groupByJob=true the API returns { jobs: [...], total, ... }
+  const body = await res.json() as { jobs?: unknown[]; total?: number };
+  expect(Array.isArray(body.jobs)).toBe(true);
+  // We seeded 6 recommendation rows → at least 1 unique job grouped
   expect(body.total).toBeGreaterThanOrEqual(1);
   await ctx.dispose();
 });

@@ -20,7 +20,7 @@ test("unauthenticated visit to / redirects to /login", async ({ page }) => {
 
 test("wrong password shows error", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Password").fill("wrong-password-xyz");
+  await page.locator("#password").fill("wrong-password-xyz");
   await page.getByRole("button", { name: /sign in/i }).click();
 
   // Error message should appear — exact text comes from the API
@@ -39,7 +39,7 @@ test("empty password keeps submit disabled", async ({ page }) => {
 
 test("correct password logs in and shows user name", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Password").fill(E2E_PASSWORD);
+  await page.locator("#password").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: /sign in/i }).click();
 
   // Should navigate away from /login
@@ -52,7 +52,7 @@ test("correct password logs in and shows user name", async ({ page }) => {
 test("logout returns to /login", async ({ page }) => {
   // Log in first
   await page.goto("/login");
-  await page.getByLabel("Password").fill(E2E_PASSWORD);
+  await page.locator("#password").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: /sign in/i }).click();
   await expect(page).toHaveURL("/", { timeout: 15_000 });
 
@@ -69,7 +69,7 @@ test("logout returns to /login", async ({ page }) => {
 
 test("session persists across page reload", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Password").fill(E2E_PASSWORD);
+  await page.locator("#password").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: /sign in/i }).click();
   await expect(page).toHaveURL("/", { timeout: 15_000 });
 

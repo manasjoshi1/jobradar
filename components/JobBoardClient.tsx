@@ -437,6 +437,7 @@ export function JobBoardClient({
   useEffect(() => {
     if (mainTab !== "recommended" && mainTab !== "alerts") return;
     const controller = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRecLoading(true);
     setRecError(null);
 
@@ -611,9 +612,11 @@ export function JobBoardClient({
 
   useEffect(() => {
     if (mainTab === "history") {
+      /* eslint-disable react-hooks/set-state-in-effect */
       if (historySubTab === "sync") fetchSyncRuns(1);
       else if (historySubTab === "recs") fetchRecRuns(1);
       else fetchNotifs(1);
+      /* eslint-enable react-hooks/set-state-in-effect */
     } else if (mainTab === "sources") {
       fetchSourceHealth(1, sourceHealthPageSize);
     }
@@ -694,6 +697,7 @@ export function JobBoardClient({
     if (providerFilter !== "ALL") params.set("provider", providerFilter);
     if (locationFilter.trim()) params.set("location", locationFilter.trim());
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setJobsLoading(true);
     setError(null);
 

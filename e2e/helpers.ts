@@ -13,7 +13,7 @@ export const E2E_USER_NAME = "Default User";
  */
 export async function login(page: Page, password = E2E_PASSWORD) {
   await page.goto("/login");
-  await page.getByLabel("Password").fill(password);
+  await page.locator("#password").fill(password);
   await page.getByRole("button", { name: /sign in/i }).click();
 
   // Hard redirect lands on home — wait for the jobs tab to appear
