@@ -277,6 +277,7 @@ export function JobBoardClient({
 
   // Current user context
   const [currentUser, setCurrentUser] = useState<{ id: string; name: string | null; email: string | null } | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     fetch("/api/me")
@@ -284,6 +285,15 @@ export function JobBoardClient({
       .then((d) => { if (d?.user) setCurrentUser(d.user); })
       .catch(() => {});
   }, []);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      window.location.href = "/login";
+    }
+  }
 
   // Main tab
   const [mainTab, setMainTab] = useState<"jobs" | "recommended" | "alerts" | "history" | "sources">("jobs");
@@ -822,11 +832,27 @@ export function JobBoardClient({
               <p className="text-xs text-blue-300/60 mt-0.5">
                 {total.toLocaleString()} opportunities · {recCounts?.uniqueJobs?.last1d ?? 0} new jobs recommended today
               </p>
+              <p className="text-xs text-blue-300/50 mt-0.5">private dashboard</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* User pill + logout */}
               {currentUser && (
-                <p className="text-xs text-emerald-400/70 mt-0.5">
-                  👤 {currentUser.name ?? "Default User"}
-                  {currentUser.email ? ` · ${currentUser.email}` : ""}
-                </p>
+                <div className="flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/60 rounded-lg px-2.5 py-1.5">
+                  <span className="text-xs text-emerald-400/80 font-medium">
+                    {currentUser.name ?? "Default User"}
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    title="Sign out"
+                    className="ml-1 text-gray-500 hover:text-red-400 transition-colors disabled:opacity-40"
+                    type="button"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                    </svg>
+                  </button>
+                </div>
               )}
             </div>
             <div className="flex gap-2">

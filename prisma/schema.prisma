@@ -211,12 +211,13 @@ model NotificationDelivery {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model User {
-  id        String   @id @default(cuid())
-  email     String?  @unique
-  name      String?
-  isDefault Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  name         String?
+  passwordHash String?  // bcrypt hash; null = no login set yet
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   notificationPreferences UserNotificationPreference[]
   roleProfiles            UserRoleProfile[]
