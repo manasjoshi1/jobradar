@@ -4,8 +4,8 @@
  *
  * Saves onboarding preferences for the authenticated user:
  *   1. Updates user.name + user.fullName
- *   2. Upserts UserJobPreference
- *   3. Creates UserRoleProfile rows (one per selected preset + custom)
+ *   2. Deletes existing UserRoleProfiles and creates one unified profile
+ *   3. Upserts UserJobPreference
  *   4. Marks UserOnboarding as complete
  *   5. Issues a new session JWT with onboardingCompleted: true
  *
@@ -14,27 +14,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionFromRequest, signSession, sessionCookieOptions } from "@/lib/auth";
-import { ROLE_PRESETS, buildLocationPrefs } from "@/lib/onboarding-presets";
+import { buildLocationPrefs } from "@/lib/onboarding-presets";
+import type { OnboardingData } from "@/app/onboarding/OnboardingWizard";
 
 export const dynamic = "force-dynamic";
-
-export interface OnboardingData {
-  fullName: string;
-  jobGoalLevels: string[];
-  employmentTypes: string[];
-  selectedPresets: string[];
-  customTitles: string[];
-  remoteOk: boolean;
-  hybridOk: boolean;
-  onsiteOk: boolean;
-  targetCities: string[];
-  needsSponsorship: boolean;
-  mustHaveKeywords: string[];
-  niceHaveKeywords: string[];
-  negativeKeywords: string[];
-  minScore: number;
-  blockedCompanies: string[];
-}
 
 export async function POST(request: NextRequest) {
   const session = await getSessionFromRequest(request);
@@ -62,88 +45,58 @@ export async function POST(request: NextRequest) {
     where: { id: userId },
     data: {
       fullName,
-      name: fullName,  // keep name in sync so it shows in the header
+      name: fullName,
     },
   });
 
-  // ── 2. Build location preferences ────────────────────────────────────────────
-  const locationPrefs = buildLocationPrefs({
-    remoteOk: data.remoteOk,
-    hybridOk: data.hybridOk,
-    onsiteOk: data.onsiteOk,
-    targetCities: data.targetCities,
+  // ── 2. Build merged title + keyword lists ─────────────────────────────────────
+  const allTitles = [
+    ...(data.selectedTitles ?? []),
+    ...(data.hiddenTitles ?? []),
+    ...(data.customTitles ?? []),
+  ].map((t) => t.trim()).filter(Boolean);
+
+  // If nothing was selected, fall back to sensible defaults
+  const preferredTitles = allTitles.length > 0
+    ? allTitles
+    : ["Software Engineer", "Backend Engineer"];
+
+  const mustHaveKeywords  = (data.selectedSkills ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const niceHaveKeywords  = (data.niceHaveKeywords ?? []).map((k) => k.trim().toLowerCase()).filter(Boolean);
+  const negativeKeywords  = (data.negativeKeywords ?? []).map((k) => k.trim().toLowerCase()).filter(Boolean);
+  const minScore          = Math.max(10, Math.min(90, Number(data.minScore) || 40));
+  const locationPrefs     = buildLocationPrefs({
+    remoteOk:    data.remoteOk ?? true,
+    hybridOk:    data.hybridOk ?? true,
+    onsiteOk:    data.onsiteOk ?? true,
+    targetCities: data.targetCities ?? [],
   });
 
-  // ── 3. Delete existing role profiles and recreate from scratch ───────────────
+  // ── 3. Delete existing role profiles + create one unified profile ─────────────
   await prisma.userRoleProfile.deleteMany({ where: { userId } });
 
-  const selectedPresets = (data.selectedPresets ?? []).filter(Boolean);
-  const customTitles    = (data.customTitles ?? []).map((t) => t.trim()).filter(Boolean);
-  const extraMustHave   = (data.mustHaveKeywords ?? []).map((k) => k.trim()).filter(Boolean);
-  const extraNiceHave   = (data.niceHaveKeywords ?? []).map((k) => k.trim()).filter(Boolean);
-  const negativeKws     = (data.negativeKeywords ?? []).map((k) => k.trim()).filter(Boolean);
-  const minScore        = Math.max(10, Math.min(90, Number(data.minScore) || 45));
-
-  if (selectedPresets.length > 0) {
-    let priority = 10 + selectedPresets.length;
-    for (const presetId of selectedPresets) {
-      const preset = ROLE_PRESETS.find((p) => p.id === presetId);
-      if (!preset) continue;
-
-      const allTitles   = [...new Set([...preset.titles, ...customTitles])];
-      const allMust     = [...new Set([...preset.mustHave, ...extraMustHave])];
-      const allNice     = [...new Set([...preset.niceHave, ...extraNiceHave])];
-      const allNegative = [...new Set([...preset.negative, ...negativeKws])];
-
-      await prisma.userRoleProfile.create({
-        data: {
-          userId,
-          name:               preset.label,
-          enabled:            true,
-          priority:           priority--,
-          preferredTitles:    JSON.stringify(allTitles),
-          preferredLocations: JSON.stringify(locationPrefs),
-          mustHaveKeywords:   JSON.stringify(allMust),
-          niceHaveKeywords:   JSON.stringify(allNice),
-          negativeKeywords:   JSON.stringify(allNegative),
-          requiresSponsorship: data.needsSponsorship,
-          minScore,
-        },
-      });
-    }
-  } else {
-    // No presets — create a single "Custom" profile using whatever keywords provided
-    const titles = customTitles.length > 0
-      ? customTitles
-      : ["Software Engineer", "Backend Engineer"];
-
-    await prisma.userRoleProfile.create({
-      data: {
-        userId,
-        name:               "Custom Profile",
-        enabled:            true,
-        priority:           10,
-        preferredTitles:    JSON.stringify(titles),
-        preferredLocations: JSON.stringify(locationPrefs),
-        mustHaveKeywords:   JSON.stringify(extraMustHave),
-        niceHaveKeywords:   JSON.stringify(extraNiceHave),
-        negativeKeywords:   JSON.stringify(negativeKws),
-        requiresSponsorship: data.needsSponsorship,
-        minScore,
-      },
-    });
-  }
+  await prisma.userRoleProfile.create({
+    data: {
+      userId,
+      name:               "My Job Search Profile",
+      enabled:            true,
+      priority:           10,
+      preferredTitles:    JSON.stringify(preferredTitles),
+      preferredLocations: JSON.stringify(locationPrefs),
+      mustHaveKeywords:   JSON.stringify(mustHaveKeywords),
+      niceHaveKeywords:   JSON.stringify(niceHaveKeywords),
+      negativeKeywords:   JSON.stringify(negativeKeywords),
+      requiresSponsorship: data.needsSponsorship ?? true,
+      minScore,
+    },
+  });
 
   // ── 4. Upsert UserJobPreference ───────────────────────────────────────────────
-  const targetRoles = selectedPresets.length > 0
-    ? selectedPresets.flatMap((presetId) => {
-        const preset = ROLE_PRESETS.find((p) => p.id === presetId);
-        return preset ? preset.titles : [];
-      })
-    : customTitles;
+  // Collect target roles from selected titles
+  const targetRoles = preferredTitles.slice(0, 30); // cap for DB sanity
 
   await prisma.userJobPreference.upsert({
-    where: { userId },
+    where:  { userId },
     create: {
       userId,
       targetLocations:    JSON.stringify(locationPrefs),
@@ -151,20 +104,20 @@ export async function POST(request: NextRequest) {
       blockedCompanies:   JSON.stringify(data.blockedCompanies ?? []),
       preferredCompanies: JSON.stringify([]),
       minScore,
-      requiresSponsorship: data.needsSponsorship,
+      requiresSponsorship: data.needsSponsorship ?? true,
     },
     update: {
       targetLocations:    JSON.stringify(locationPrefs),
       targetRoles:        JSON.stringify([...new Set(targetRoles)]),
       blockedCompanies:   JSON.stringify(data.blockedCompanies ?? []),
       minScore,
-      requiresSponsorship: data.needsSponsorship,
+      requiresSponsorship: data.needsSponsorship ?? true,
     },
   });
 
-  // ── 5. Mark onboarding complete ───────────────────────────────────────────────
+  // ── 5. Mark onboarding complete + store full prefs snapshot ──────────────────
   await prisma.userOnboarding.upsert({
-    where: { userId },
+    where:  { userId },
     create: {
       userId,
       onboardingCompleted: true,
@@ -179,16 +132,16 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  // ── 6. Fetch fresh user for new JWT ──────────────────────────────────────────
+  // ── 6. Issue updated JWT with onboardingCompleted: true ───────────────────────
   const updatedUser = await prisma.user.findUniqueOrThrow({
-    where: { id: userId },
+    where:  { id: userId },
     select: { id: true, name: true, isDefault: true },
   });
 
   const token = await signSession({
-    sub:                updatedUser.id,
-    name:               updatedUser.name,
-    isDefault:          updatedUser.isDefault,
+    sub:                 updatedUser.id,
+    name:                updatedUser.name,
+    isDefault:           updatedUser.isDefault,
     onboardingCompleted: true,
   });
 

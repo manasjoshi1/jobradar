@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { OnboardingWizard } from "./OnboardingWizard";
 
 export const dynamic = "force-dynamic";
@@ -20,9 +21,18 @@ export default async function OnboardingPage() {
     redirect("/");
   }
 
+  // Fetch email for the account-confirmation step
+  const user = await prisma.user.findUnique({
+    where: { id: session.sub },
+    select: { email: true },
+  });
+
   return (
     <div className="min-h-screen bg-gray-950">
-      <OnboardingWizard initialName={session.name ?? ""} />
+      <OnboardingWizard
+        initialName={session.name ?? ""}
+        initialEmail={user?.email ?? ""}
+      />
     </div>
   );
 }

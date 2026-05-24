@@ -1,92 +1,119 @@
 /**
- * Role presets for the onboarding wizard.
+ * Onboarding wizard data — role titles, hidden aliases, skill categories.
  * Shared between the wizard UI and the API handler.
  */
 
-export interface RolePreset {
+// ── Primary job titles ────────────────────────────────────────────────────────
+
+export const PRIMARY_TITLES: string[] = [
+  "Software Engineer",
+  "Backend Developer",
+  "Frontend Developer",
+  "Full Stack Developer",
+  "Java Developer",
+  "Spring Boot Developer",
+  "React Developer",
+  "Node.js Developer",
+  "Python Developer",
+  "Cloud Engineer",
+  "DevOps Engineer",
+  "QA Automation Engineer",
+  "SDET",
+  "Data Engineer",
+  "Data Analyst",
+  "Business Analyst",
+  "Systems Analyst",
+  "Application Support Engineer",
+  "Production Support Engineer",
+  "Technical Support Engineer",
+  "Implementation Engineer",
+  "Integration Engineer",
+  "Solutions Engineer",
+  "Technical Consultant",
+  "IT Analyst",
+  "Software Developer Intern",
+  "Software Engineer Intern",
+  "New Grad Software Engineer",
+  "Associate Software Engineer",
+];
+
+// ── Hidden / alias titles ─────────────────────────────────────────────────────
+// Shown under an "Also match these hidden titles" toggle.
+// Useful for ATS searches that use non-standard designations.
+
+export const HIDDEN_TITLES: string[] = [
+  "Application Developer",
+  "Programmer Analyst",
+  "Technology Analyst",
+  "Associate Consultant",
+  "Systems Engineer",
+  "Software Analyst",
+  "Product Engineer",
+  "Platform Engineer",
+  "Cloud Support Associate",
+  "Site Reliability Engineer",
+  "Release Engineer",
+  "Build Engineer",
+  "API Developer",
+  "Integration Developer",
+  "Implementation Specialist",
+  "Technical Business Analyst",
+  "Junior Developer",
+  "Graduate Software Engineer",
+];
+
+// ── Skill categories ──────────────────────────────────────────────────────────
+
+export interface SkillCategory {
   id: string;
   label: string;
-  emoji: string;
-  titles: string[];
-  mustHave: string[];
-  niceHave: string[];
-  negative: string[];
+  skills: string[];
 }
 
-export const ROLE_PRESETS: RolePreset[] = [
+export const SKILL_CATEGORIES: SkillCategory[] = [
   {
-    id: "backend-java",
-    label: "Backend Java / Spring Boot",
-    emoji: "☕",
-    titles: ["Backend Engineer", "Software Engineer", "Java Engineer", "Java Developer", "Platform Engineer"],
-    mustHave: ["java", "spring"],
-    niceHave: ["aws", "kubernetes", "kafka", "microservices", "springboot"],
-    negative: ["wordpress", "php", "intern"],
+    id: "languages",
+    label: "Languages",
+    skills: ["Java", "JavaScript", "TypeScript", "Python", "SQL", "HTML", "CSS"],
   },
   {
-    id: "fullstack-react",
-    label: "Full Stack React + Node",
-    emoji: "⚛️",
-    titles: ["Full Stack Engineer", "Software Engineer", "Full Stack Developer"],
-    mustHave: ["react", "typescript"],
-    niceHave: ["nodejs", "nextjs", "postgres", "graphql", "tailwind"],
-    negative: ["wordpress", "php", "intern"],
+    id: "backend",
+    label: "Backend",
+    skills: [
+      "Spring Boot", "REST APIs", "Microservices", "Node.js", "Express.js",
+      "Authentication", "Payment Systems", "API Integration",
+    ],
   },
   {
-    id: "payments-fintech",
-    label: "Payments / Fintech",
-    emoji: "💳",
-    titles: ["Payments Engineer", "Platform Engineer", "Software Engineer", "Backend Engineer"],
-    mustHave: ["payments"],
-    niceHave: ["stripe", "fintech", "api", "distributed systems", "ledger"],
-    negative: ["wordpress", "intern"],
+    id: "frontend",
+    label: "Frontend",
+    skills: ["React", "Next.js", "Tailwind CSS", "Material UI", "Flutter"],
   },
   {
-    id: "python-backend",
-    label: "Python Backend",
-    emoji: "🐍",
-    titles: ["Backend Engineer", "Software Engineer", "Python Developer", "Python Engineer"],
-    mustHave: ["python"],
-    niceHave: ["django", "fastapi", "flask", "aws", "postgres", "celery"],
-    negative: ["wordpress", "intern"],
+    id: "databases",
+    label: "Databases",
+    skills: ["PostgreSQL", "MongoDB", "MySQL", "Redis", "SQLite"],
   },
   {
-    id: "devops-sre",
-    label: "DevOps / SRE / Infrastructure",
-    emoji: "🏗️",
-    titles: ["DevOps Engineer", "SRE", "Site Reliability Engineer", "Infrastructure Engineer", "Platform Engineer"],
-    mustHave: ["kubernetes"],
-    niceHave: ["terraform", "aws", "gcp", "azure", "helm", "prometheus", "grafana"],
-    negative: ["intern"],
+    id: "cloud-devops",
+    label: "Cloud / DevOps",
+    skills: ["AWS", "EC2", "RDS", "S3", "Docker", "Nginx", "Linux", "CI/CD"],
   },
   {
-    id: "data-engineering",
-    label: "Data Engineering",
-    emoji: "📊",
-    titles: ["Data Engineer", "Senior Data Engineer", "Analytics Engineer"],
-    mustHave: ["data engineering"],
-    niceHave: ["spark", "airflow", "kafka", "python", "dbt", "snowflake", "databricks"],
-    negative: ["intern"],
+    id: "testing",
+    label: "Testing",
+    skills: ["JUnit", "Postman", "API Testing", "QA Automation", "Selenium"],
   },
   {
-    id: "golang-backend",
-    label: "Go / Golang Backend",
-    emoji: "🐹",
-    titles: ["Backend Engineer", "Software Engineer", "Go Engineer", "Golang Developer"],
-    mustHave: ["golang"],
-    niceHave: ["kubernetes", "grpc", "microservices", "aws", "distributed"],
-    negative: ["wordpress", "intern"],
-  },
-  {
-    id: "ml-ai",
-    label: "Machine Learning / AI",
-    emoji: "🤖",
-    titles: ["ML Engineer", "Machine Learning Engineer", "AI Engineer", "Research Engineer"],
-    mustHave: ["machine learning"],
-    niceHave: ["python", "pytorch", "tensorflow", "llm", "transformers", "computer vision"],
-    negative: ["intern"],
+    id: "data",
+    label: "Data",
+    skills: [
+      "ETL", "Data Analysis", "Dashboards", "Excel", "Python Data Processing",
+    ],
   },
 ];
+
+// ── Location helpers ──────────────────────────────────────────────────────────
 
 /** Build preferred locations array from wizard answers. */
 export function buildLocationPrefs(opts: {
@@ -96,14 +123,14 @@ export function buildLocationPrefs(opts: {
   targetCities: string[];
 }): string[] {
   const locs: string[] = [];
-  if (opts.remoteOk) locs.push("remote");
-  if (opts.hybridOk) locs.push("hybrid");
-  if (opts.onsiteOk) locs.push("onsite");
+  if (opts.remoteOk)  locs.push("remote");
+  if (opts.hybridOk)  locs.push("hybrid");
+  if (opts.onsiteOk)  locs.push("onsite");
   for (const city of opts.targetCities) {
     const c = city.trim().toLowerCase();
     if (c) locs.push(c);
   }
-  // If nothing selected, default to remote + US
+  // Default fallback
   if (locs.length === 0) locs.push("remote", "united states");
   return locs;
 }
