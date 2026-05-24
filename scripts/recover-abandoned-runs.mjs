@@ -36,7 +36,7 @@ const [syncResult, recResult] = await Promise.all([
     data: {
       status: 'FAILED',
       finishedAt: new Date(),
-      errorSummary: `Recovered: run was stuck RUNNING for >${thresholdMinutes}m — likely lost to restart/deploy/crash.`,
+      errorSummary: `Recovered: run was stuck RUNNING for >${thresholdMinutes}m -- likely lost to restart/deploy/crash.`,
     },
   }),
   prisma.recommendationRun.updateMany({
@@ -44,7 +44,7 @@ const [syncResult, recResult] = await Promise.all([
     data: {
       status: 'FAILED',
       finishedAt: new Date(),
-      errorSummary: `Recovered: run was stuck RUNNING for >${thresholdMinutes}m — likely lost to restart/deploy/crash.`,
+      errorSummary: `Recovered: run was stuck RUNNING for >${thresholdMinutes}m -- likely lost to restart/deploy/crash.`,
     },
   }),
 ]);

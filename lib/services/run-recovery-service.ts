@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 
 export async function recoverAbandonedRuns(thresholdMinutes = 30): Promise<void> {
   const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000);
-  const errorSummary = `Recovered: run was stuck RUNNING for >${thresholdMinutes}m — likely lost to restart/deploy/crash.`;
+  const errorSummary = `Recovered: stuck RUNNING for >${thresholdMinutes}m -- lost to restart/deploy/crash.`;
 
   const [syncResult, recResult] = await Promise.all([
     prisma.syncRun.updateMany({
