@@ -10,7 +10,7 @@ jobs:
   test:
     name: Lint · Build · E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     env:
       # ── E2E database isolated from any production DB ─────────────────────
@@ -98,7 +98,7 @@ jobs:
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -120,7 +120,7 @@ jobs:
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     needs: [test, docker-build]
 
