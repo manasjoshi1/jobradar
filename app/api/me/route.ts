@@ -1,17 +1,25 @@
 /**
  * GET /api/me
  *
- * Returns the current (default) user's profile, preferences, and role profile summary.
- * Used by the UI to show "User: Default User" and surface per-user config.
+ * Returns the current logged-in user's profile, preferences, and role profiles.
+ * User is resolved from session cookie (falls back to default user for CLI/bootstrap).
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getSessionUserId } from "@/lib/get-user-id";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const user = await prisma.user.findFirst({
-    where: { isDefault: true },
+  let userId: string;
+  try {
+    userId = await getSessionUserId();
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
     select: {
       id: true,
       name: true,
@@ -20,11 +28,11 @@ export async function GET() {
       createdAt: true,
       preferences: {
         select: {
-          targetLocations:    true,
-          targetRoles:        true,
-          blockedCompanies:   true,
-          preferredCompanies: true,
-          minScore:           true,
+          targetLocations:     true,
+          targetRoles:         true,
+          blockedCompanies:    true,
+          preferredCompanies:  true,
+          minScore:            true,
           requiresSponsorship: true,
         },
       },
@@ -35,16 +43,14 @@ export async function GET() {
     },
   });
 
-  if (!user) {
-    return NextResponse.json({ error: "No default user" }, { status: 404 });
-  }
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const [recCount, unseenCount, statusCounts] = await Promise.all([
-    prisma.userJobRecommendation.count({ where: { userId: user.id } }),
-    prisma.userJobRecommendation.count({ where: { userId: user.id, status: "UNSEEN" } }),
+    prisma.userJobRecommendation.count({ where: { userId } }),
+    prisma.userJobRecommendation.count({ where: { userId, status: "UNSEEN" } }),
     prisma.userJobStatus.groupBy({
       by:    ["status"],
-      where: { userId: user.id },
+      where: { userId },
       _count: { _all: true },
     }),
   ]);
@@ -65,9 +71,9 @@ export async function GET() {
         : null,
     },
     stats: {
-      totalRecommendations: recCount,
+      totalRecommendations:  recCount,
       unseenRecommendations: unseenCount,
-      jobStatuses: statusMap,
+      jobStatuses:           statusMap,
     },
   });
 }

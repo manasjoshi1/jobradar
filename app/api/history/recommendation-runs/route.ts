@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
+import { getSessionUserId } from "@/lib/get-user-id";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
   let userId: string;
   try {
-    userId = await getDefaultUserId();
+    userId = await getSessionUserId();
   } catch {
     return NextResponse.json({ total: 0, page, pageSize, runs: [] });
   }

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { groupUserRecommendations } from "@/lib/recommendation/group-user-recommendations";
-import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
+import { getSessionUserId } from "@/lib/get-user-id";
 import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   // Resolve user (default user for now — future: extract from session)
   let userId: string;
   try {
-    userId = await getDefaultUserId();
+    userId = await getSessionUserId();
   } catch {
     return NextResponse.json({ error: "No default user. Run db:seed-user." }, { status: 500 });
   }

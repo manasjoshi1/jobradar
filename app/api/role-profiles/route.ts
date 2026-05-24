@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
+import { getSessionUserId } from "@/lib/get-user-id";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   let userId: string;
   try {
-    userId = await getDefaultUserId();
+    userId = await getSessionUserId();
   } catch {
     // Fall back to global role profiles if no user yet
     const profiles = await prisma.roleProfile.findMany({

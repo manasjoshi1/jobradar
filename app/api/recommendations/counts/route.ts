@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getDefaultUserId } from "@/lib/services/user-recommendation-service";
+import { getSessionUserId } from "@/lib/get-user-id";
 import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ async function countUniqueJobs(where: Prisma.UserJobRecommendationWhereInput) {
 export async function GET() {
   let userId: string;
   try {
-    userId = await getDefaultUserId();
+    userId = await getSessionUserId();
   } catch {
     return NextResponse.json({ error: "No default user" }, { status: 500 });
   }
