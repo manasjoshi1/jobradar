@@ -25,7 +25,8 @@ model JobSource {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  jobs Job[]
+  jobs        Job[]
+  userSources UserJobSource[]
 }
 
 model Job {
@@ -227,6 +228,7 @@ model User {
   recommendationRuns      UserRecommendationRun[]
   preferences             UserJobPreference?
   onboarding              UserOnboarding?
+  jobSources              UserJobSource[]
 
   @@index([isDefault])
 }
@@ -242,6 +244,25 @@ model UserOnboarding {
   updatedAt           DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id])
+}
+
+model UserJobSource {
+  id       String @id @default(cuid())
+  userId   String
+  sourceId String
+
+  enabled  Boolean @default(true)
+  priority Int     @default(0)
+  tags     String? // JSON array — user-specific tag overrides
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User      @relation(fields: [userId], references: [id])
+  source JobSource @relation(fields: [sourceId], references: [id])
+
+  @@unique([userId, sourceId])
+  @@index([userId, enabled])
 }
 
 model UserRoleProfile {
