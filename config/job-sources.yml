@@ -1,0 +1,121 @@
+providers:
+  greenhouse:
+    enabled: true
+    jobsUrlTemplate: "https://boards-api.greenhouse.io/v1/boards/{boardToken}/jobs?content=true"
+
+  lever:
+    enabled: true
+    jobsUrlTemplate: "https://api.lever.co/v0/postings/{boardToken}"
+
+  ashby:
+    enabled: true
+    jobsUrlTemplate: "https://api.ashbyhq.com/posting-api/job-board/{boardToken}"
+
+  custom:
+    enabled: true
+
+sources:
+  - company: Stripe
+    provider: greenhouse
+    boardToken: stripe
+    enabled: true
+    priority: 10
+    tags: ["payments", "fintech", "backend"]
+
+  - company: OpenAI
+    provider: ashby
+    boardToken: openai
+    enabled: true
+    priority: 10
+    tags: ["ai", "backend", "infra"]
+
+  - company: Anthropic
+    provider: greenhouse
+    boardToken: anthropic
+    enabled: true
+    priority: 10
+    tags: ["ai", "backend", "infra"]
+
+  - company: Cloudflare
+    provider: greenhouse
+    boardToken: cloudflare
+    enabled: true
+    priority: 9
+    tags: ["cloud", "networking", "backend"]
+
+  - company: Datadog
+    provider: greenhouse
+    boardToken: datadog
+    enabled: true
+    priority: 9
+    tags: ["observability", "backend", "cloud"]
+
+  - company: Twilio
+    provider: greenhouse
+    boardToken: twilio
+    enabled: true
+    priority: 8
+    tags: ["communications", "api", "backend"]
+
+  - company: Plaid
+    provider: greenhouse
+    boardToken: plaid
+    enabled: true
+    priority: 9
+    tags: ["fintech", "payments", "backend"]
+
+  - company: Square
+    provider: greenhouse
+    boardToken: square
+    enabled: true
+    priority: 9
+    tags: ["payments", "fintech", "backend"]
+
+  - company: Spotify
+    provider: lever
+    boardToken: spotify
+    enabled: true
+    priority: 7
+    tags: ["product", "backend", "data"]
+
+  - company: Figma
+    provider: greenhouse
+    boardToken: figma
+    enabled: true
+    priority: 7
+    tags: ["design", "frontend", "backend"]
+
+  - company: Notion
+    provider: greenhouse
+    boardToken: notion
+    enabled: true
+    priority: 7
+    tags: ["productivity", "backend", "fullstack"]
+
+  - company: Linear
+    provider: ashby
+    boardToken: linear
+    enabled: true
+    priority: 7
+    tags: ["productivity", "backend", "frontend"]
+
+  - company: Vercel
+    provider: lever
+    boardToken: vercel
+    enabled: true
+    priority: 8
+    tags: ["cloud", "frontend", "devops"]
+
+  - company: HashiCorp
+    provider: greenhouse
+    boardToken: hashicorp
+    enabled: true
+    priority: 8
+    tags: ["devops", "cloud", "infra"]
+
+  - company: PagerDuty
+    provider: greenhouse
+    boardToken: pagerduty
+    enabled: true
+    priority: 7
+    tags: ["observability", "devops", "backend"]

@@ -1,0 +1,288 @@
+profiles:
+  - name: Backend Java / Spring / AWS
+    enabled: true
+    priority: 10
+    minScore: 48
+    requiresSponsorship: false
+
+    preferredTitles:
+      - software engineer
+      - backend engineer
+      - java developer
+      - platform engineer
+      - api engineer
+      - senior engineer
+
+    preferredLocations:
+      - remote
+      - united states
+      - chicago
+      - hybrid
+
+    mustHaveKeywords:
+      - java
+      - spring
+      - spring boot
+      - backend
+      - api
+      - rest
+      - microservices
+
+    niceHaveKeywords:
+      - aws
+      - docker
+      - kubernetes
+      - postgresql
+      - postgres
+      - mongodb
+      - redis
+      - payments
+      - stripe
+      - distributed systems
+      - kafka
+
+    negativeKeywords:
+      - wordpress
+      - php
+      - salesforce admin
+      - ios only
+      - android only
+      - manual tester only
+
+  - name: Full Stack React + Backend
+    enabled: true
+    priority: 8
+    minScore: 46
+    requiresSponsorship: false
+
+    preferredTitles:
+      - full stack engineer
+      - software engineer
+      - frontend engineer
+      - web engineer
+      - fullstack engineer
+
+    preferredLocations:
+      - remote
+      - united states
+      - chicago
+
+    mustHaveKeywords:
+      - react
+      - typescript
+      - javascript
+      - api
+      - backend
+
+    niceHaveKeywords:
+      - next.js
+      - node
+      - java
+      - spring
+      - aws
+      - postgresql
+      - docker
+      - graphql
+
+    negativeKeywords:
+      - wordpress
+      - shopify only
+      - php only
+      - manual tester
+
+  - name: Cloud / DevOps / SRE
+    enabled: true
+    priority: 7
+    minScore: 46
+    requiresSponsorship: false
+
+    preferredTitles:
+      - cloud engineer
+      - devops engineer
+      - site reliability engineer
+      - infrastructure engineer
+      - platform engineer
+      - sre
+
+    preferredLocations:
+      - remote
+      - united states
+      - chicago
+
+    mustHaveKeywords:
+      - aws
+      - cloud
+      - docker
+      - kubernetes
+      - linux
+
+    niceHaveKeywords:
+      - terraform
+      - ci/cd
+      - observability
+      - prometheus
+      - grafana
+      - monitoring
+      - helm
+      - ansible
+
+    negativeKeywords:
+      - desktop support
+      - help desk
+      - hardware technician
+      - manual tester
+
+  - name: Payments / Platform Engineer
+    enabled: true
+    priority: 9
+    minScore: 48
+    requiresSponsorship: false
+
+    preferredTitles:
+      - platform engineer
+      - backend engineer
+      - payments engineer
+      - software engineer
+      - senior engineer
+
+    preferredLocations:
+      - remote
+      - united states
+      - chicago
+
+    mustHaveKeywords:
+      - backend
+      - api
+      - payments
+      - platform
+
+    niceHaveKeywords:
+      - stripe
+      - fintech
+      - ledger
+      - billing
+      - checkout
+      - risk
+      - fraud
+      - java
+      - spring
+      - aws
+
+    negativeKeywords:
+      - sales
+      - account executive
+      - customer support
+      - manual tester
+
+  - name: Application Developer Java/Python/.NET
+    enabled: true
+    priority: 6
+    minScore: 42
+    requiresSponsorship: false
+
+    preferredTitles:
+      - application developer
+      - software developer
+      - software engineer
+      - backend developer
+
+    preferredLocations:
+      - remote
+      - united states
+      - chicago
+
+    mustHaveKeywords:
+      - software
+      - application
+      - developer
+
+    niceHaveKeywords:
+      - java
+      - python
+      - .net
+      - c#
+      - sql
+      - api
+      - cloud
+
+    negativeKeywords:
+      - wordpress
+      - php only
+      - manual tester only
+
+  - name: QA / Automation Engineer
+    enabled: true
+    priority: 5
+    minScore: 40
+    requiresSponsorship: false
+
+    preferredTitles:
+      - qa automation engineer
+      - software development engineer in test
+      - sdet
+      - test automation engineer
+      - quality engineer
+      - qa engineer
+
+    preferredLocations:
+      - remote
+      - united states
+      - chicago
+
+    mustHaveKeywords:
+      - automation
+      - testing
+      - qa
+
+    niceHaveKeywords:
+      - selenium
+      - playwright
+      - cypress
+      - java
+      - python
+      - api testing
+      - ci/cd
+
+    negativeKeywords:
+      - manual only
+      - call center
+
+  - name: Data / Systems Engineer
+    enabled: true
+    priority: 5
+    minScore: 40
+    requiresSponsorship: false
+
+    preferredTitles:
+      - systems engineer
+      - data engineer
+      - integration engineer
+      - software engineer
+      - data platform engineer
+
+    preferredLocations:
+      - chicago
+      - remote
+      - united states
+
+    mustHaveKeywords:
+      - data
+      - systems
+      - integration
+
+    niceHaveKeywords:
+      - transit
+      - transportation
+      - monitoring
+      - telemetry
+      - linux
+      - python
+      - cloud
+      - aws
+      - spark
+      - kafka
+
+    negativeKeywords:
+      - civil engineer
+      - mechanical engineer
+      - manual tester

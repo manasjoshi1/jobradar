@@ -6,6 +6,8 @@ export const DEFAULT_PAGE = 1;
 export const DEFAULT_PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 100;
 
+export type SortOption = "newest" | "oldest" | "recently-seen" | "title-asc" | "company-asc";
+
 export type JobQueryParams = {
   page?: number;
   pageSize?: number;
@@ -16,6 +18,7 @@ export type JobQueryParams = {
   provider?: string;
   location?: string;
   active?: string;
+  sort?: SortOption;
 };
 
 export type SerializedJob = {
@@ -60,6 +63,9 @@ export async function getPaginatedJobs(
   const where = buildJobWhere(params);
   const skip = (page - 1) * pageSize;
 
+  // Build orderBy based on sort parameter
+  const orderBy = buildOrderBy(params.sort);
+
   const [jobs, total] = await Promise.all([
     prisma.job.findMany({
       where,
@@ -73,7 +79,7 @@ export async function getPaginatedJobs(
           },
         },
       },
-      orderBy: [{ postedAt: "desc" }, { firstSeenAt: "desc" }],
+      orderBy,
     }),
     prisma.job.count({ where }),
   ]);
@@ -115,7 +121,24 @@ export function parseJobQueryParams(searchParams: URLSearchParams): JobQueryPara
     provider: stringParam(searchParams.get("provider")),
     location: stringParam(searchParams.get("location")),
     active: stringParam(searchParams.get("active")),
+    sort: (searchParams.get("sort") as SortOption) || "newest",
   };
+}
+
+function buildOrderBy(sort?: SortOption): Prisma.JobOrderByWithRelationInput[] {
+  switch (sort) {
+    case "oldest":
+      return [{ postedAt: "asc" }, { firstSeenAt: "asc" }];
+    case "recently-seen":
+      return [{ lastSeenAt: "desc" }, { postedAt: "desc" }];
+    case "title-asc":
+      return [{ title: "asc" }, { postedAt: "desc" }];
+    case "company-asc":
+      return [{ company: "asc" }, { postedAt: "desc" }];
+    case "newest":
+    default:
+      return [{ postedAt: "desc" }, { firstSeenAt: "desc" }];
+  }
 }
 
 function buildJobWhere(params: JobQueryParams): Prisma.JobWhereInput {

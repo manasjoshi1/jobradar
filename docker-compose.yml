@@ -9,8 +9,18 @@ services:
       JOB_SOURCE_FILE: "/app/imports/public_job_api_targets_321.xlsx"
       NODE_ENV: "production"
       NODE_OPTIONS: "--max-old-space-size=384"
+      ENABLE_SCHEDULER: "true"
+      CRON_SECRET: "change-this-secret"
+      NOTIFICATIONS_ENABLED: "false"
+      NOTIFICATION_CHANNEL: "telegram"
+      TELEGRAM_BOT_TOKEN: ""
+      TELEGRAM_CHAT_ID: ""
+      DISCORD_WEBHOOK_URL: ""
+      SLACK_WEBHOOK_URL: ""
+      APP_PUBLIC_URL: "http://localhost:3000"
     volumes:
       - ./data:/app/data
+      - ./config:/app/config:ro
       - ./imports:/app/imports:ro
     mem_limit: 512m
     restart: unless-stopped

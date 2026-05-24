@@ -87,6 +87,26 @@ async function syncJobs() {
             .join(" "),
         );
         const now = new Date();
+        const postedAt = job.postedAt ? new Date(job.postedAt) : null;
+
+        // effectiveNewAt = postedAt if provider gives it, else firstSeenAt (now for new jobs)
+        const effectiveNewAt = postedAt ?? now;
+
+        // For existing jobs: only update effectiveNewAt if we now have a real postedAt
+        // and effectiveNewAt was previously null or was set to firstSeenAt (no real postedAt before)
+        const existingFull = existing
+          ? await prisma.job.findUnique({
+              where: { sourceId_applyUrl: { sourceId: source.id, applyUrl: job.applyUrl } },
+              select: { effectiveNewAt: true, postedAt: true, firstSeenAt: true },
+            })
+          : null;
+
+        const updatedEffectiveNewAt =
+          postedAt && existingFull && !existingFull.postedAt
+            ? postedAt // we now have a real postedAt — update effectiveNewAt
+            : existingFull
+              ? undefined // already set correctly — don't change
+              : effectiveNewAt; // new job — set it
 
         await prisma.job.upsert({
           where: {
@@ -105,7 +125,8 @@ async function syncJobs() {
             employmentType: job.employmentType || null,
             applyUrl: job.applyUrl,
             description: job.description || null,
-            postedAt: job.postedAt ? new Date(job.postedAt) : null,
+            postedAt,
+            effectiveNewAt,
             sponsorship,
             status: "NEW",
             firstSeenAt: now,
@@ -121,7 +142,10 @@ async function syncJobs() {
             department: job.department || null,
             employmentType: job.employmentType || null,
             description: job.description || null,
-            postedAt: job.postedAt ? new Date(job.postedAt) : null,
+            postedAt,
+            ...(updatedEffectiveNewAt !== undefined
+              ? { effectiveNewAt: updatedEffectiveNewAt }
+              : {}),
             sponsorship,
             lastSeenAt: now,
             isActive: true,
