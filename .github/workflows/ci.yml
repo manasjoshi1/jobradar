@@ -13,78 +13,71 @@ jobs:
     timeout-minutes: 25
 
     env:
-      # ── E2E database (isolated from any production DB) ──────────────────
+      # ── E2E database isolated from any production DB ─────────────────────
       DATABASE_URL: "file:./prisma/e2e.db"
+
       # ── Auth / sessions ──────────────────────────────────────────────────
       SESSION_SECRET: "ci-e2e-session-secret-minimum-32-chars-xx"
       COOKIE_SECURE: "false"
+
       # ── Disable scheduler & external notifications ───────────────────────
       ENABLE_SCHEDULER: "false"
       NOTIFICATIONS_ENABLED: "false"
       ALL_NEW_JOBS_NOTIFICATIONS_ENABLED: "false"
       NOTIFICATION_CHANNEL: "none"
+
       # ── E2E mode flags ────────────────────────────────────────────────────
       NODE_ENV: "test"
       E2E_TEST: "true"
+
       # ── Point at fixture config, not production YAML ──────────────────────
       CONFIG_DIR: "./config/e2e"
-      # ── Sync (unused in E2E but silences startup warnings) ────────────────
+
+      # ── Sync config for CI startup stability ──────────────────────────────
       SYNC_FETCH_CONCURRENCY: "2"
       SYNC_DB_CONCURRENCY: "1"
       SOURCE_FETCH_TIMEOUT_MS: "3000"
       SOURCE_FETCH_RETRIES: "0"
 
     steps:
-      # ── 1. Checkout ───────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Node.js setup with npm cache ───────────────────────────────────
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
 
-      # ── 3. Install dependencies ───────────────────────────────────────────
       - name: Install dependencies
         run: npm ci
 
-      # ── 4. Generate Prisma client ─────────────────────────────────────────
       - name: Generate Prisma client
         run: npx prisma generate
 
-      # ── 5. Lint ───────────────────────────────────────────────────────────
       - name: Lint
         run: npm run lint
 
-      # ── 6. TypeScript build (also validates schema) ───────────────────────
       - name: Build
         run: npm run build
 
-      # ── 7. Validate Prisma schema ─────────────────────────────────────────
       - name: Validate Prisma schema
         run: npx prisma validate
 
-      # ── 8. Create E2E SQLite DB ───────────────────────────────────────────
       - name: Create E2E database
         run: |
           rm -f prisma/e2e.db
           npx prisma migrate deploy
 
-      # ── 9. Seed E2E data ──────────────────────────────────────────────────
       - name: Seed E2E data
         run: node scripts/e2e-seed.mjs
 
-      # ── 10. Install Playwright browsers (Chromium only) ───────────────────
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      # ── 11. Run E2E tests (app started by start-server-and-test) ──────────
       - name: Run E2E tests
         run: npm run ci:e2e
 
-      # ── 12. Upload Playwright report & artifacts on failure ───────────────
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
@@ -93,7 +86,7 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-      - name: Upload test results (traces / screenshots / videos)
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -120,10 +113,8 @@ jobs:
           context: .
           push: false
           tags: jobradar:ci
-          # Use layer cache from the GitHub Actions cache
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Dockerfile sets NODE_ENV=production in the runner stage directly
 
   # ── Job 3: Deploy to EC2 ─────────────────────────────────────────────────
   deploy:
@@ -131,69 +122,96 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Both CI jobs must be green before we touch production
     needs: [test, docker-build]
 
-    # Only deploy on push events — never on pull_request
-    # (pull_request events from forks don't have access to secrets anyway,
-    #  but the explicit guard makes intent clear and prevents accidental deploys)
-    if: github.event_name == 'push'
+    # Only deploy after successful CI on push.
+    # Pull requests must never deploy.
+    if: ${{ github.event_name == 'push' }}
 
+    # IMPORTANT:
+    # Do not use secrets inside environment.url.
+    # GitHub Actions rejects secrets in that expression context.
     environment:
       name: production
-      url: http://${{ secrets.EC2_HOST }}
 
     steps:
+      - name: Check deploy secrets
+        id: deploy_secrets
+        shell: bash
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
+        run: |
+          missing="false"
+
+          if [ -z "$EC2_HOST" ]; then
+            echo "Missing secret: EC2_HOST"
+            missing="true"
+          fi
+
+          if [ -z "$EC2_USER" ]; then
+            echo "Missing secret: EC2_USER"
+            missing="true"
+          fi
+
+          if [ -z "$EC2_SSH_KEY" ]; then
+            echo "Missing secret: EC2_SSH_KEY"
+            missing="true"
+          fi
+
+          if [ -z "$EC2_APP_DIR" ]; then
+            echo "Missing secret: EC2_APP_DIR"
+            missing="true"
+          fi
+
+          if [ "$missing" = "true" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Deploy secrets are incomplete. Skipping EC2 deploy."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Deploy secrets are present."
+          fi
+
       - name: Deploy to EC2
+        if: ${{ steps.deploy_secrets.outputs.ready == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host:     ${{ secrets.EC2_HOST }}
+          host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key:      ${{ secrets.EC2_SSH_KEY }}
-          # Abort the entire script on the first failing command
+          key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |
             set -euo pipefail
 
             APP_DIR="${{ secrets.EC2_APP_DIR }}"
+
             echo "==> Deploying to $APP_DIR"
             cd "$APP_DIR"
 
-            # ── 1. Pull latest code ──────────────────────────────────────────
-            # git reset --hard is safe: .env and data/ are not tracked by git.
-            # The SQLite volume (./data) and secrets (.env) are never touched.
             echo "==> Fetching latest code..."
             git fetch origin
             git reset --hard FETCH_HEAD
 
-            # ── 2. Rebuild image and restart container ───────────────────────
             echo "==> Building Docker image and restarting container..."
             docker compose up --build -d
 
-            # ── 3. Wait for container to initialise ──────────────────────────
-            echo "==> Waiting 15 s for container to become ready..."
+            echo "==> Waiting for container to become ready..."
             sleep 15
 
-            # ── 4. Run idempotent bootstrap (migrations, config, backfill) ───
             echo "==> Running deploy bootstrap..."
             docker compose exec -T jobradar npm run deploy:bootstrap
 
-            # ── 5. Confirm container is running ──────────────────────────────
             echo "==> Container status:"
             docker compose ps
 
-            # ── 6. Health checks ─────────────────────────────────────────────
-            # /api/auth/me returns 401 when unauthenticated — that's expected
-            # and still proves the Next.js server is alive and routing correctly.
             echo "==> Health check: Next.js API..."
-            curl -sf http://localhost/api/auth/me \
-              -o /dev/null -w "HTTP %{http_code}\n" || true
+            curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost/api/auth/me || true
 
             echo "==> Health check: nginx / root..."
-            curl -sf http://localhost -o /dev/null -w "HTTP %{http_code}\n"
-
-            # Hard fail if the root returns a non-2xx/3xx (nginx is down)
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost)
+
             if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 500 ]; then
               echo "ERROR: health check failed — HTTP $HTTP_CODE"
               exit 1
