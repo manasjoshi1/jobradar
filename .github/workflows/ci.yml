@@ -227,9 +227,6 @@ jobs:
             echo "==> Restarting container from pulled image..."
             $COMPOSE up -d --remove-orphans
 
-            echo "==> Waiting for container to become ready..."
-            sleep 15
-
             echo "==> Verify running image (must be ghcr.io, not local build)..."
             docker inspect -f '{{.Config.Image}}' jobradar
 
@@ -239,12 +236,26 @@ jobs:
             echo "==> Container status:"
             $COMPOSE ps
 
-            echo "==> Health check..."
-            HTTP_CODE=$(curl -fsS -o /dev/null -w "%{http_code}" http://localhost/api/health || echo "000")
+            echo "==> Health check (direct → port 3000, bypasses nginx)..."
+            # Hit the app directly on the container port — no nginx in the path.
+            # -f is intentionally omitted: it exits non-zero on 4xx and corrupts
+            # the captured status when combined with || fallback.
+            # Retry up to 10 times (50 s) to allow Next.js startup time.
+            HEALTH_OK=false
+            for attempt in $(seq 1 10); do
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/health)
+              echo "  attempt $attempt: HTTP $HTTP_CODE"
+              if [ "$HTTP_CODE" = "200" ]; then
+                HEALTH_OK=true
+                break
+              fi
+              sleep 5
+            done
 
-            if [ "$HTTP_CODE" != "200" ]; then
-              echo "ERROR: /api/health returned HTTP $HTTP_CODE (expected 200)"
+            if [ "$HEALTH_OK" != "true" ]; then
+              echo "ERROR: /api/health never returned 200 (last: HTTP $HTTP_CODE)"
+              docker logs jobradar --tail 50 || true
               exit 1
             fi
 
-            echo "==> Deploy complete! /api/health → HTTP $HTTP_CODE"
+            echo "==> Deploy complete! /api/health → HTTP 200"
