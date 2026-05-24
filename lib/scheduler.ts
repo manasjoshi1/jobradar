@@ -32,8 +32,8 @@ async function runHourlyJob() {
       `[scheduler] Sync done — created=${syncResult.jobsCreated} updated=${syncResult.jobsUpdated} stale=${syncResult.jobsMarkedStale} failed=${syncResult.sourcesFailed}/${syncResult.sourcesProcessed} (${(syncResult.durationMs / 1000).toFixed(1)}s)`,
     );
 
-    // Run recommendations — use 24h window so jobs from any recent sync are scored
-    const recResult = await runRecommendations(24);
+    // Run recommendations — 48h window so every fresh job gets scored each run
+    const recResult = await runRecommendations(48);
     console.log(
       `[scheduler] Recommendations done — scanned=${recResult.jobsScanned} created=${recResult.recommendationsCreated} updated=${recResult.recommendationsUpdated}`,
     );
@@ -65,11 +65,11 @@ async function runHourlyJob() {
       },
     });
 
-    // Send if: new recs were created this run, OR unseen recs exist and it has
-    // been at least 4 hours since the last notification (digest mode).
+    // Send if: new recs created this run, OR unseen recs exist and it's been
+    // at least 1h since the last notification (match the run cadence).
     const shouldNotify =
       recResult.recommendationsCreated > 0 ||
-      (unseenRecs.length > 0 && hoursSinceLastSent >= 4);
+      (unseenRecs.length > 0 && hoursSinceLastSent >= 1);
 
     if (shouldNotify) {
       await sendRecommendationNotification({
@@ -105,12 +105,12 @@ export function startScheduler() {
   }
 
   isScheduled = true;
-  // Run at the top of every hour
-  cron.schedule("0 * * * *", () => {
+  // Run every 30 minutes — max lag from job posting to your notification is ~30 min
+  cron.schedule("*/30 * * * *", () => {
     runHourlyJob().catch((err) =>
       console.error("[scheduler] Unhandled error:", err),
     );
   });
 
-  console.log("[scheduler] Started — running hourly at :00");
+  console.log("[scheduler] Started — running every 30 min at :00 and :30");
 }
