@@ -109,8 +109,9 @@ test("YAML import via UI successfully imports user preferences", async ({ page }
   const yamlTextarea = page.locator("textarea").last();
   await yamlTextarea.fill(testYaml);
 
-  // Make sure "User Profile" import type is selected (it's the default)
-  await page.getByRole("button", { name: "User Profile" }).click();
+  // Make sure "User Profile" import type is selected (it's the default).
+  // exact:true is required — "Export User Profile" button also contains the substring.
+  await page.getByRole("button", { name: "User Profile", exact: true }).click();
 
   // Click Import button (exact match to avoid hitting "Importing…" disabled variant)
   await page.getByRole("button", { name: /^Import$/ }).click();
