@@ -49,6 +49,12 @@ model Job {
   source         JobSource @relation(fields: [sourceId], references: [id])
 
   @@unique([sourceId, applyUrl])
+  @@index([isActive])
+  @@index([status])
+  @@index([sponsorship])
+  @@index([sourceId])
+  @@index([postedAt])
+  @@index([isActive, postedAt])
 }
 
 model SyncRun {

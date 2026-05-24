@@ -128,6 +128,8 @@ export function JobBoardClient({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refetchKey, setRefetchKey] = useState(0);
+  const [companySearch, setCompanySearch] = useState("");
+  const [debouncedCompanySearch, setDebouncedCompanySearch] = useState("");
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -139,6 +141,15 @@ export function JobBoardClient({
   }, [search]);
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedCompanySearch(companySearch);
+      setPage(1);
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [companySearch]);
+
+  useEffect(() => {
     const controller = new AbortController();
 
     const params = new URLSearchParams({
@@ -147,6 +158,7 @@ export function JobBoardClient({
       active: activeFilter,
     });
     if (debouncedSearch) params.set("search", debouncedSearch);
+    if (debouncedCompanySearch) params.set("company", debouncedCompanySearch);
     if (statusFilter !== "ALL") params.set("status", statusFilter);
     if (sponsorshipFilter !== "ANY") params.set("sponsorship", sponsorshipFilter);
     if (providerFilter !== "ALL") params.set("provider", providerFilter);
@@ -187,6 +199,7 @@ export function JobBoardClient({
     page,
     pageSize,
     debouncedSearch,
+    debouncedCompanySearch,
     statusFilter,
     sponsorshipFilter,
     providerFilter,
@@ -198,6 +211,8 @@ export function JobBoardClient({
   function resetFilters() {
     setSearch("");
     setDebouncedSearch("");
+    setCompanySearch("");
+    setDebouncedCompanySearch("");
     setStatusFilter("ALL");
     setSponsorshipFilter("ANY");
     setProviderFilter("ALL");
@@ -291,15 +306,26 @@ export function JobBoardClient({
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <section className="grid gap-3 border-b border-slate-200 pb-5">
-          <label className="grid gap-1 text-sm font-medium text-slate-700">
-            Search
-            <input
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-600"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="backend java spring aws remote"
-              value={search}
-            />
-          </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Search Jobs
+              <input
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-600"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="backend java spring aws remote"
+                value={search}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Company
+              <input
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-600"
+                onChange={(event) => setCompanySearch(event.target.value)}
+                placeholder="google amazon meta microsoft"
+                value={companySearch}
+              />
+            </label>
+          </div>
 
           <div className="grid gap-3 md:grid-cols-5">
             <Select
@@ -419,6 +445,38 @@ export function JobBoardClient({
           onStatusChange={updateJobStatus}
           totalJobs={total}
         />
+
+        <section className="border-t border-slate-200 py-5">
+          <div className="flex items-center justify-center gap-4">
+            {jobsLoading && (
+              <svg className="h-5 w-5 animate-spin text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            )}
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={page <= 1 || jobsLoading}
+              onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
+              type="button"
+            >
+              ← Previous
+            </button>
+            <span className="px-2 py-2 text-sm text-slate-600">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={page >= totalPages || jobsLoading}
+              onClick={() =>
+                setPage((currentPage) => Math.min(totalPages, currentPage + 1))
+              }
+              type="button"
+            >
+              Next →
+            </button>
+          </div>
+        </section>
       </main>
     </div>
   );

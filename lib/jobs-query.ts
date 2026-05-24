@@ -10,6 +10,7 @@ export type JobQueryParams = {
   page?: number;
   pageSize?: number;
   search?: string;
+  company?: string;
   status?: string;
   sponsorship?: string;
   provider?: string;
@@ -108,6 +109,7 @@ export function parseJobQueryParams(searchParams: URLSearchParams): JobQueryPara
     page: numberParam(searchParams.get("page")),
     pageSize: numberParam(searchParams.get("pageSize")),
     search: stringParam(searchParams.get("search")),
+    company: stringParam(searchParams.get("company")),
     status: stringParam(searchParams.get("status")),
     sponsorship: stringParam(searchParams.get("sponsorship")),
     provider: stringParam(searchParams.get("provider")),
@@ -119,6 +121,7 @@ export function parseJobQueryParams(searchParams: URLSearchParams): JobQueryPara
 function buildJobWhere(params: JobQueryParams): Prisma.JobWhereInput {
   const where: Prisma.JobWhereInput = {};
   const search = params.search?.trim();
+  const company = params.company?.trim();
   const location = params.location?.trim();
 
   if (params.active === undefined || params.active === "" || params.active === "true") {
@@ -145,6 +148,10 @@ function buildJobWhere(params: JobQueryParams): Prisma.JobWhereInput {
 
   if (location) {
     where.location = { contains: location };
+  }
+
+  if (company) {
+    where.company = { contains: company };
   }
 
   if (search) {
