@@ -10,12 +10,13 @@ services:
       # Non-secret runtime defaults — override in .env for production
       DATABASE_URL: "file:/app/data/jobradar.db"
       NODE_ENV: "production"
-      NODE_OPTIONS: "--max-old-space-size=384"
+      NODE_OPTIONS: "--max-old-space-size=640"
       CONFIG_DIR: "/app/config"
       ENABLE_SCHEDULER: "true"
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
       - ./imports:/app/imports:ro
-    mem_limit: 512m
+    mem_limit: 750m
+    memswap_limit: 750m
     restart: unless-stopped

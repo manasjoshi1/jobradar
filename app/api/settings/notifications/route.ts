@@ -42,6 +42,11 @@ export async function GET() {
   const envChannel  = (process.env.NOTIFICATION_CHANNEL ?? "slack").toUpperCase();
   const envEnabled  = process.env.NOTIFICATIONS_ENABLED === "true";
 
+  const envAllNewEnabled  = process.env.ALL_NEW_JOBS_NOTIFICATIONS_ENABLED === "true";
+  const envAllNewLookback = Number(process.env.ALL_NEW_JOBS_LOOKBACK_HOURS ?? "1") || 1;
+  const envAllNewMaxJobs  = Number(process.env.ALL_NEW_JOBS_MAX_JOBS ?? "50") || 50;
+  const envAllNewMaxCo    = Number(process.env.ALL_NEW_JOBS_MAX_COMPANIES ?? "10") || 10;
+
   const result = CHANNELS.map((channel) => {
     const pref = prefs.find((p) => p.channel === channel);
     return {
@@ -50,6 +55,11 @@ export async function GET() {
       lookbackHours:    pref?.lookbackHours ?? 24,
       maxJobs:          pref?.maxJobs ?? 10,
       maxJobsPerCompany: pref?.maxJobsPerCompany ?? 2,
+      // All-new-jobs digest settings
+      allNewJobsEnabled:       pref?.allNewJobsEnabled       ?? envAllNewEnabled,
+      allNewJobsLookbackHours: pref?.allNewJobsLookbackHours ?? envAllNewLookback,
+      allNewJobsMaxJobs:       pref?.allNewJobsMaxJobs       ?? envAllNewMaxJobs,
+      allNewJobsMaxCompanies:  pref?.allNewJobsMaxCompanies  ?? envAllNewMaxCo,
       // Masked secrets
       slackWebhookUrl:   mask(pref?.slackWebhookUrl ?? (channel === "SLACK"     ? envSlack   : null)),
       telegramBotToken:  mask(pref?.telegramBotToken ?? (channel === "TELEGRAM" ? envTgToken : null)),
@@ -88,6 +98,10 @@ export async function POST(request: NextRequest) {
     telegramBotToken?: string;
     telegramChatId?: string;
     discordWebhookUrl?: string;
+    allNewJobsEnabled?: boolean;
+    allNewJobsLookbackHours?: number;
+    allNewJobsMaxJobs?: number;
+    allNewJobsMaxCompanies?: number;
   };
   const data: PrefData = {};
 
@@ -95,6 +109,10 @@ export async function POST(request: NextRequest) {
   if (typeof body.lookbackHours    === "number")  data.lookbackHours    = body.lookbackHours;
   if (typeof body.maxJobs          === "number")  data.maxJobs          = body.maxJobs;
   if (typeof body.maxJobsPerCompany === "number") data.maxJobsPerCompany = body.maxJobsPerCompany;
+  if (typeof body.allNewJobsEnabled       === "boolean") data.allNewJobsEnabled       = body.allNewJobsEnabled;
+  if (typeof body.allNewJobsLookbackHours === "number")  data.allNewJobsLookbackHours = body.allNewJobsLookbackHours;
+  if (typeof body.allNewJobsMaxJobs       === "number")  data.allNewJobsMaxJobs       = body.allNewJobsMaxJobs;
+  if (typeof body.allNewJobsMaxCompanies  === "number")  data.allNewJobsMaxCompanies  = body.allNewJobsMaxCompanies;
 
   // Only update secret fields if they're non-empty and not the masked placeholder
   const isMasked = (v: unknown): boolean =>

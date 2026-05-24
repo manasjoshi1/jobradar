@@ -19,6 +19,8 @@ export type JobQueryParams = {
   location?: string;
   active?: string;
   sort?: SortOption;
+  /** Filter by firstSeenAt window: "1h" | "2h" | "3h" | "6h" | "12h" | "1d" | "2d" | "7d" */
+  newWindow?: string;
 };
 
 export type SerializedJob = {
@@ -122,7 +124,24 @@ export function parseJobQueryParams(searchParams: URLSearchParams): JobQueryPara
     location: stringParam(searchParams.get("location")),
     active: stringParam(searchParams.get("active")),
     sort: (searchParams.get("sort") as SortOption) || "newest",
+    newWindow: stringParam(searchParams.get("newWindow")),
   };
+}
+
+/** Parse a window string like "1h", "2d" → milliseconds. Returns null for unknown values. */
+export function parseWindowMs(window: string | undefined): number | null {
+  if (!window) return null;
+  const WINDOWS: Record<string, number> = {
+    "1h":  1  * 3_600_000,
+    "2h":  2  * 3_600_000,
+    "3h":  3  * 3_600_000,
+    "6h":  6  * 3_600_000,
+    "12h": 12 * 3_600_000,
+    "1d":  24 * 3_600_000,
+    "2d":  48 * 3_600_000,
+    "7d":  168 * 3_600_000,
+  };
+  return WINDOWS[window] ?? null;
 }
 
 function buildOrderBy(sort?: SortOption): Prisma.JobOrderByWithRelationInput[] {
@@ -151,6 +170,12 @@ function buildJobWhere(params: JobQueryParams): Prisma.JobWhereInput {
     where.isActive = true;
   } else if (params.active === "false") {
     where.isActive = false;
+  }
+
+  // newWindow: filter by firstSeenAt >= now - window
+  const windowMs = parseWindowMs(params.newWindow);
+  if (windowMs !== null) {
+    where.firstSeenAt = { gte: new Date(Date.now() - windowMs) };
   }
 
   if (params.status && params.status !== "ALL" && validStatuses.has(params.status)) {

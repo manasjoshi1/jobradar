@@ -5,14 +5,16 @@
  * Pipeline per run:
  *   1. Recover abandoned sync runs
  *   2. Sync jobs from all sources
- *   3. Score jobs against role profiles (48h window)
- *   4. Send notification for any unnotified unique jobs (self-managed by service)
+ *   3. Send all-new-jobs digest (newly scraped, not yet notified)
+ *   4. Score jobs against role profiles (48h window)
+ *   5. Send recommended-jobs notification
  */
 import cron from "node-cron";
 import { runUserRecommendations, getDefaultUserId } from "@/lib/services/user-recommendation-service";
 import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
 import { runSync } from "@/lib/services/sync-service";
 import { sendRecommendationNotification } from "@/lib/services/notification-service";
+import { sendAllNewJobsNotification } from "@/lib/services/all-new-jobs-notification-service";
 
 let isRunning  = false;
 let isScheduled = false;
@@ -38,7 +40,14 @@ async function runScheduledJob() {
       `(${(syncResult.durationMs / 1000).toFixed(1)}s)`,
     );
 
-    // 3. Score recommendations per-user (48h window catches all recent jobs)
+    // 3. All-new-jobs digest — notify about every newly scraped job (1h window)
+    if (syncResult.jobsCreated > 0) {
+      await sendAllNewJobsNotification({ lookbackHours: 1 });
+    } else {
+      console.log("[scheduler] Skipping all-new-jobs notification — no new jobs created");
+    }
+
+    // 4. Score recommendations per-user (48h window catches all recent jobs)
     const userId = await getDefaultUserId();
     const recResult = await runUserRecommendations(userId, 48);
     console.log(
@@ -46,7 +55,7 @@ async function runScheduledJob() {
       `created=${recResult.recommendationsCreated} updated=${recResult.recommendationsUpdated}`,
     );
 
-    // 4. Notify — service queries its own unnotified recs, groups by job, dedupes
+    // 5. Recommended-jobs notification — service queries its own unnotified recs
     await sendRecommendationNotification({ recommendationRunId: recResult.runId });
   } catch (err) {
     console.error("[scheduler] Run failed:", err);

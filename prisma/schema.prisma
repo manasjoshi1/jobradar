@@ -53,6 +53,9 @@ model Job {
   lastSeenAt  DateTime @default(now())
   isActive    Boolean  @default(true)
 
+  /// Set after this job is included in an ALL_NEW_JOBS notification delivery
+  allNewJobsNotifiedAt DateTime?
+
   source              JobSource              @relation(fields: [sourceId], references: [id])
   /// Legacy global recommendations — preserved for backward compat
   recommendations     JobRecommendation[]
@@ -72,6 +75,8 @@ model Job {
   @@index([isActive, postedAt])
   @@index([isActive, effectiveNewAt])
   @@index([jobFingerprint])
+  @@index([isActive, firstSeenAt])
+  @@index([allNewJobsNotifiedAt])
 }
 
 model SyncRun {
@@ -182,8 +187,11 @@ model NotificationDelivery {
   id                  String    @id @default(cuid())
   channel             String    // TELEGRAM, DISCORD, SLACK, NONE
   status              String    // SENT, FAILED, SKIPPED
+  /// RECOMMENDED_JOBS | ALL_NEW_JOBS | TEST | SYNC_HEALTH
+  notificationType    String    @default("RECOMMENDED_JOBS")
   windowHours         Int       @default(1)
   recommendationCount Int       @default(0)
+  jobCount            Int       @default(0)
   messagePreview      String?
   errorMessage        String?
   sentAt              DateTime?
@@ -194,6 +202,7 @@ model NotificationDelivery {
 
   @@index([channel, createdAt])
   @@index([status, createdAt])
+  @@index([notificationType, createdAt])
   @@index([recommendationRunId])
 }
 
@@ -348,6 +357,12 @@ model UserNotificationPreference {
   lookbackHours     Int @default(24)
   maxJobs           Int @default(10)
   maxJobsPerCompany Int @default(2)
+
+  // All-new-jobs digest settings
+  allNewJobsEnabled     Boolean @default(true)
+  allNewJobsLookbackHours Int   @default(1)
+  allNewJobsMaxJobs     Int     @default(50)
+  allNewJobsMaxCompanies Int    @default(10)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
