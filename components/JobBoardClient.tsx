@@ -122,8 +122,20 @@ type RecCounts = {
   unseen: number;
 };
 
-const WINDOW_OPTIONS = ["1h","2h","3h","6h","12h","1d","2d","7d"] as const;
+const WINDOW_OPTIONS = ["1h","6h","1d","2d","7d","30d","all"] as const;
 type WindowOption = typeof WINDOW_OPTIONS[number];
+const WINDOW_LABELS: Record<WindowOption, string> = {
+  "1h": "1h", "6h": "6h", "1d": "1d", "2d": "2d", "7d": "7d", "30d": "30d", "all": "All",
+};
+
+// Smart location quick-filters
+const LOCATION_PRESETS = [
+  { label: "🇺🇸 US", value: "US" },
+  { label: "🌐 Remote", value: "remote" },
+  { label: "🏙 Hybrid", value: "hybrid" },
+  { label: "🏢 On-site", value: "on-site" },
+  { label: "🌍 International", value: "international" },
+] as const;
 const REC_STATUSES = ["ALL","UNSEEN","SEEN","SAVED","APPLIED","SKIPPED"] as const;
 
 // ── History types ──────────────────────────────────────────────────────────
@@ -250,10 +262,12 @@ export function JobBoardClient({
   const [recTotalPages, setRecTotalPages] = useState(1);
   const [recPage, setRecPage] = useState(1);
   const [recLoading, setRecLoading] = useState(false);
-  const [recWindow, setRecWindow] = useState<WindowOption>("1d");
+  const [recWindow, setRecWindow] = useState<WindowOption>("7d");
   const [recStatus, setRecStatus] = useState<typeof REC_STATUSES[number]>("ALL");
   const [recProfileId, setRecProfileId] = useState("all");
   const [recSponsorship, setRecSponsorship] = useState("ANY");
+  const [recLocation, setRecLocation] = useState("");
+  const [recMinScore, setRecMinScore] = useState(0);
   const [recCounts, setRecCounts] = useState<RecCounts | null>(null);
   const [roleProfiles, setRoleProfiles] = useState<RoleProfileRef[]>([]);
   const [recRunLoading, setRecRunLoading] = useState(false);
@@ -369,6 +383,8 @@ export function JobBoardClient({
     }
     if (recProfileId !== "all") params.set("roleProfileId", recProfileId);
     if (recSponsorship !== "ANY") params.set("sponsorship", recSponsorship);
+    if (recLocation) params.set("location", recLocation);
+    if (recMinScore > 0) params.set("minScore", String(recMinScore));
 
     fetch(`/api/recommendations?${params}`, { signal: controller.signal })
       .then((r) => r.json() as Promise<{ recommendations: Recommendation[]; total: number; totalPages: number }>)
@@ -384,7 +400,7 @@ export function JobBoardClient({
         setRecLoading(false);
       });
     return () => controller.abort();
-  }, [mainTab, recPage, recWindow, recStatus, recProfileId, recSponsorship]);
+  }, [mainTab, recPage, recWindow, recStatus, recProfileId, recSponsorship, recLocation, recMinScore]);
 
   async function runRecommendations(windowHours: number) {
     setRecRunLoading(true);
@@ -795,12 +811,42 @@ export function JobBoardClient({
               </div>
             )}
 
+            {/* Total count banner */}
+            <div className="flex items-center justify-between mb-4 px-1">
+              <div className="text-lg font-bold text-white">
+                {recLoading ? (
+                  <span className="text-blue-300 text-sm animate-pulse">Loading…</span>
+                ) : (
+                  <>
+                    <span className="text-3xl text-blue-400 font-extrabold tabular-nums">{recTotal}</span>
+                    <span className="text-blue-300 text-sm ml-2">
+                      {mainTab === "alerts" ? "unseen recommendations" : "recommendations"}
+                      {recWindow !== "all" && ` · last ${WINDOW_LABELS[recWindow]}`}
+                    </span>
+                  </>
+                )}
+              </div>
+              {/* Clear all filters */}
+              {(recLocation || recMinScore > 0 || recStatus !== "ALL" || recSponsorship !== "ANY" || recProfileId !== "all") && (
+                <button
+                  onClick={() => {
+                    setRecLocation(""); setRecMinScore(0); setRecStatus("ALL");
+                    setRecSponsorship("ANY"); setRecProfileId("all"); setRecPage(1);
+                  }}
+                  className="text-xs text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded px-2 py-1 transition"
+                >
+                  ✕ Clear filters
+                </button>
+              )}
+            </div>
+
             {/* Rec filters */}
-            <div className="rounded-2xl bg-white/10 backdrop-blur border border-blue-500/30 p-4 mb-6">
-              <div className="flex flex-wrap gap-3 items-center mb-3">
+            <div className="rounded-2xl bg-white/10 backdrop-blur border border-blue-500/30 p-4 mb-6 space-y-3">
+              {/* Row 1: Window + Location presets */}
+              <div className="flex flex-wrap gap-3 items-center">
                 {/* Window */}
-                <div>
-                  <span className="text-xs text-blue-300 mr-1">Window:</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-blue-300/70">Window:</span>
                   <div className="inline-flex rounded-lg border border-blue-500/30 overflow-hidden">
                     {WINDOW_OPTIONS.map((w) => (
                       <button
@@ -812,13 +858,46 @@ export function JobBoardClient({
                             : "text-blue-300 hover:bg-white/10"
                         }`}
                       >
-                        {w}
+                        {WINDOW_LABELS[w]}
                       </button>
                     ))}
                   </div>
                 </div>
+
+                {/* Location presets */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-blue-300/70">Location:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {LOCATION_PRESETS.map((p) => (
+                      <button
+                        key={p.value}
+                        onClick={() => {
+                          setRecLocation(recLocation === p.value ? "" : p.value);
+                          setRecPage(1);
+                        }}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium border transition ${
+                          recLocation === p.value
+                            ? "bg-blue-500/40 border-blue-400 text-white"
+                            : "bg-white/5 border-blue-500/20 text-blue-300 hover:border-blue-400 hover:text-white"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    {/* Free-text location search */}
+                    <input
+                      type="text"
+                      placeholder="City / State…"
+                      value={LOCATION_PRESETS.some(p => p.value === recLocation) ? "" : recLocation}
+                      onChange={(e) => { setRecLocation(e.target.value); setRecPage(1); }}
+                      className="rounded-full bg-slate-800/60 border border-blue-500/25 text-white placeholder-blue-300/40 px-3 py-1 text-xs w-28 focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-3">
+
+              {/* Row 2: Profile, Status, Sponsorship, Min Score */}
+              <div className="flex flex-wrap gap-3 items-center">
                 {/* Role profile */}
                 <select
                   value={recProfileId}
@@ -851,14 +930,30 @@ export function JobBoardClient({
                   className="rounded-lg bg-slate-800/50 border border-blue-500/30 text-white px-3 py-2 text-sm"
                 >
                   <option value="ANY">Any Sponsorship</option>
-                  <option value="YES">Visa: YES</option>
-                  <option value="NO">Visa: NO</option>
-                  <option value="UNKNOWN">Visa: UNKNOWN</option>
+                  <option value="YES">✅ Visa Sponsored</option>
+                  <option value="NO">❌ No Sponsorship</option>
+                  <option value="UNKNOWN">❓ Unknown</option>
                 </select>
 
-                <span className="ml-auto text-sm text-blue-300 self-center">
-                  {recLoading ? "Loading..." : `${recTotal} recommendations`}
-                </span>
+                {/* Min score */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-blue-300/70">Min Score:</span>
+                  <div className="inline-flex rounded-lg border border-blue-500/30 overflow-hidden">
+                    {[0, 40, 50, 60, 70, 80].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => { setRecMinScore(s); setRecPage(1); }}
+                        className={`px-2.5 py-1.5 text-xs font-medium transition ${
+                          recMinScore === s
+                            ? "bg-blue-500 text-white"
+                            : "text-blue-300 hover:bg-white/10"
+                        }`}
+                      >
+                        {s === 0 ? "Any" : `${s}+`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 

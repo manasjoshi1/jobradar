@@ -13,6 +13,8 @@ const WINDOW_MAP: Record<string, number> = {
   "1d": 24,
   "2d": 48,
   "7d": 168,
+  "30d": 720,
+  "all": 0, // special — no date filter applied
 };
 
 const VALID_STATUSES = new Set(["UNSEEN", "SEEN", "SAVED", "APPLIED", "SKIPPED"]);
@@ -26,17 +28,19 @@ export async function GET(request: NextRequest) {
   const skip = (page - 1) * pageSize;
 
   // Filters
-  const windowParam = sp.get("window") ?? "1d";
-  const windowHours = WINDOW_MAP[windowParam] ?? 24;
+  const windowParam = sp.get("window") ?? "7d";
+  const windowHours = WINDOW_MAP[windowParam] ?? 168;
   const windowStart = new Date(Date.now() - windowHours * 60 * 60 * 1000);
 
   const statusParam = sp.get("status") ?? "ALL";
   const roleProfileId = sp.get("roleProfileId") ?? "all";
   const sponsorshipParam = sp.get("sponsorship") ?? "ANY";
+  const locationParam = sp.get("location") ?? "";
+  const minScore = Number(sp.get("minScore") ?? "0") || 0;
 
   // Build where clause
   const where: Prisma.JobRecommendationWhereInput = {
-    recommendedAt: { gte: windowStart },
+    ...(windowParam !== "all" ? { recommendedAt: { gte: windowStart } } : {}),
   };
 
   if (statusParam !== "ALL" && VALID_STATUSES.has(statusParam)) {
@@ -47,8 +51,46 @@ export async function GET(request: NextRequest) {
     where.roleProfileId = roleProfileId;
   }
 
+  if (minScore > 0) {
+    where.score = { gte: minScore };
+  }
+
+  // Build job-level sub-filter combining sponsorship + location
+  const jobFilter: Prisma.JobWhereInput = {};
   if (sponsorshipParam !== "ANY") {
-    where.job = { sponsorship: sponsorshipParam };
+    jobFilter.sponsorship = sponsorshipParam;
+  }
+  if (locationParam) {
+    // "US" is a special alias that matches US-based locations broadly
+    if (locationParam.toUpperCase() === "US") {
+      jobFilter.OR = [
+        { location: { contains: "United States", mode: "insensitive" } },
+        { location: { contains: ", US", mode: "insensitive" } },
+        { location: { contains: "U.S.", mode: "insensitive" } },
+        // Match common US state abbreviations at end: "New York, NY"
+        { location: { contains: ", NY", mode: "insensitive" } },
+        { location: { contains: ", CA", mode: "insensitive" } },
+        { location: { contains: ", TX", mode: "insensitive" } },
+        { location: { contains: ", WA", mode: "insensitive" } },
+        { location: { contains: ", IL", mode: "insensitive" } },
+        { location: { contains: ", MA", mode: "insensitive" } },
+        { location: { contains: ", CO", mode: "insensitive" } },
+        { location: { contains: ", GA", mode: "insensitive" } },
+        { location: { contains: ", FL", mode: "insensitive" } },
+        { location: { contains: ", VA", mode: "insensitive" } },
+        { location: { contains: ", NC", mode: "insensitive" } },
+        { location: { contains: ", AZ", mode: "insensitive" } },
+        { location: { contains: ", NJ", mode: "insensitive" } },
+        { location: { contains: ", OH", mode: "insensitive" } },
+        { location: { contains: ", PA", mode: "insensitive" } },
+        { location: { contains: ", MN", mode: "insensitive" } },
+      ];
+    } else {
+      jobFilter.location = { contains: locationParam, mode: "insensitive" };
+    }
+  }
+  if (Object.keys(jobFilter).length > 0) {
+    where.job = jobFilter;
   }
 
   const [total, recommendations] = await Promise.all([
