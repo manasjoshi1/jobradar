@@ -1,18 +1,17 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { LoginForm } from "./LoginForm";
+import { RegisterForm } from "./RegisterForm";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Sign in — JobRadar",
+  title: "Create account — JobRadar",
 };
 
-export default async function LoginPage() {
+export default async function RegisterPage() {
   // Already logged in
   const session = await getSession();
   if (session) {
-    // Respect onboarding state when redirecting
     const onboardingCompleted = session.onboardingCompleted ?? true;
     redirect(onboardingCompleted ? "/" : "/onboarding");
   }
@@ -29,10 +28,10 @@ export default async function LoginPage() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">JobRadar</h1>
-          <p className="text-sm text-gray-400 mt-1">Sign in to your dashboard</p>
+          <p className="text-sm text-gray-400 mt-1">Create your account to get started</p>
         </div>
 
-        <LoginForm />
+        <RegisterForm />
       </div>
     </div>
   );

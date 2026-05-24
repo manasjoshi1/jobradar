@@ -85,6 +85,7 @@ async function main() {
   await prisma.userJobPreference.deleteMany();
   await prisma.userRoleProfile.deleteMany();
   await prisma.userNotificationPreference.deleteMany();
+  await prisma.userOnboarding.deleteMany();
   await prisma.notificationDelivery.deleteMany();
   await prisma.jobRecommendation.deleteMany();
   await prisma.recommendationRun.deleteMany();
@@ -144,6 +145,7 @@ async function main() {
     data: {
       id:           "e2e-user-default",
       name:         "Default User",
+      fullName:     "Default User",
       email:        "e2e@jobradar.test",
       isDefault:    true,
       passwordHash,
@@ -151,6 +153,17 @@ async function main() {
   });
 
   console.log(`   ✓ User "${user.name}" (id: ${user.id})`);
+
+  // Create UserOnboarding record with onboardingCompleted=true for the E2E test user.
+  // This ensures the proxy does NOT redirect the test user to /onboarding.
+  await prisma.userOnboarding.create({
+    data: {
+      userId:              user.id,
+      onboardingCompleted: true,
+      onboardingVersion:   1,
+      completedAt:         new Date(),
+    },
+  });
 
   // ── 4. Create UserJobPreference ──────────────────────────────────────────
   await prisma.userJobPreference.create({

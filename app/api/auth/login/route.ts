@@ -30,7 +30,13 @@ export async function POST(request: NextRequest) {
   }
 
   // Find user — by email if provided, else by isDefault
-  let user: { id: string; name: string | null; email: string | null; passwordHash: string | null; isDefault: boolean } | null = null;
+  let user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    passwordHash: string | null;
+    isDefault: boolean;
+  } | null = null;
 
   if (body.email?.trim()) {
     user = await prisma.user.findUnique({
@@ -45,8 +51,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!user) {
-    // Generic message — don't reveal whether user exists
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
 
   if (!user.passwordHash) {
@@ -58,18 +63,28 @@ export async function POST(request: NextRequest) {
 
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) {
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
 
+  // Fetch onboarding state
+  const onboarding = await prisma.userOnboarding.findUnique({
+    where: { userId: user.id },
+    select: { onboardingCompleted: true },
+  });
+  // Existing users without an onboarding record are treated as already complete
+  const onboardingCompleted = onboarding?.onboardingCompleted ?? true;
+
   const token = await signSession({
-    sub:       user.id,
-    name:      user.name,
-    isDefault: user.isDefault,
+    sub:                user.id,
+    name:               user.name,
+    isDefault:          user.isDefault,
+    onboardingCompleted,
   });
 
   const res = NextResponse.json({
     ok: true,
     user: { id: user.id, name: user.name, email: user.email, isDefault: user.isDefault },
+    onboardingCompleted,
   });
   res.cookies.set(sessionCookieOptions(token));
   return res;

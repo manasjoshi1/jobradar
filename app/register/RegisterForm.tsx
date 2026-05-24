@@ -2,41 +2,50 @@
 
 import { useState, useRef, useEffect } from "react";
 
-export function LoginForm() {
-  const emailRef    = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+export function RegisterForm() {
+  const fullNameRef = useRef<HTMLInputElement>(null);
 
-  const [email, setEmail]       = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError]       = useState<string | null>(null);
-  const [loading, setLoading]   = useState(false);
-  const [showPw, setShowPw]     = useState(false);
+  const [fullName,     setFullName]     = useState("");
+  const [email,        setEmail]        = useState("");
+  const [password,     setPassword]     = useState("");
+  const [confirmPass,  setConfirmPass]  = useState("");
+  const [showPw,       setShowPw]       = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [loading,      setLoading]      = useState(false);
 
-  useEffect(() => { emailRef.current?.focus(); }, []);
+  useEffect(() => { fullNameRef.current?.focus(); }, []);
+
+  const canSubmit =
+    fullName.trim().length >= 2 &&
+    email.trim().length > 0 &&
+    password.length >= 8 &&
+    confirmPass.length > 0;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim())    { setError("Enter your email"); return; }
-    if (!password.trim()) { setError("Enter your password"); return; }
+    if (!canSubmit) return;
+
+    if (password !== confirmPass) {
+      setError("Passwords do not match");
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/auth/register", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ email: email.trim(), password }),
+        body:    JSON.stringify({ fullName, email: email.trim(), password, confirmPassword: confirmPass }),
       });
 
       if (res.ok) {
-        const data = await res.json() as { onboardingCompleted?: boolean };
-        // Hard redirect — proxy re-evaluates the new session cookie.
-        // If onboarding is incomplete, proxy will redirect to /onboarding.
-        window.location.href = data.onboardingCompleted === false ? "/onboarding" : "/";
+        // Registration succeeded — session cookie is set, redirect to onboarding
+        window.location.href = "/onboarding";
       } else {
         const data = await res.json() as { error?: string };
-        setError(data.error ?? "Login failed");
+        setError(data.error ?? "Registration failed");
       }
     } catch {
       setError("Network error — try again");
@@ -49,18 +58,40 @@ export function LoginForm() {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl space-y-4">
 
-        {/* Email field */}
+        {/* Full Name */}
+        <div>
+          <label htmlFor="fullName" className="block text-sm font-medium text-gray-300 mb-1.5">
+            Full name
+          </label>
+          <input
+            id="fullName"
+            ref={fullNameRef}
+            type="text"
+            value={fullName}
+            onChange={(e) => { setFullName(e.target.value); setError(null); }}
+            placeholder="Jane Smith"
+            autoComplete="name"
+            className={`
+              w-full bg-gray-800 border rounded-lg px-3.5 py-2.5
+              text-white placeholder-gray-500 text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+              transition-colors
+              ${error ? "border-red-500" : "border-gray-700"}
+            `}
+          />
+        </div>
+
+        {/* Email */}
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
             Email
           </label>
           <input
             id="email"
-            ref={emailRef}
             type="email"
             value={email}
             onChange={(e) => { setEmail(e.target.value); setError(null); }}
-            placeholder="you@example.com"
+            placeholder="jane@example.com"
             autoComplete="email"
             className={`
               w-full bg-gray-800 border rounded-lg px-3.5 py-2.5
@@ -72,20 +103,19 @@ export function LoginForm() {
           />
         </div>
 
-        {/* Password field */}
+        {/* Password */}
         <div>
           <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1.5">
-            Password
+            Password <span className="text-gray-500 font-normal">(min 8 characters)</span>
           </label>
           <div className="relative">
             <input
               id="password"
-              ref={passwordRef}
               type={showPw ? "text" : "password"}
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError(null); }}
-              placeholder="Enter password"
-              autoComplete="current-password"
+              placeholder="Create a strong password"
+              autoComplete="new-password"
               className={`
                 w-full bg-gray-800 border rounded-lg px-3.5 py-2.5 pr-10
                 text-white placeholder-gray-500 text-sm
@@ -115,6 +145,28 @@ export function LoginForm() {
           </div>
         </div>
 
+        {/* Confirm Password */}
+        <div>
+          <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-300 mb-1.5">
+            Confirm password
+          </label>
+          <input
+            id="confirmPassword"
+            type={showPw ? "text" : "password"}
+            value={confirmPass}
+            onChange={(e) => { setConfirmPass(e.target.value); setError(null); }}
+            placeholder="Repeat your password"
+            autoComplete="new-password"
+            className={`
+              w-full bg-gray-800 border rounded-lg px-3.5 py-2.5
+              text-white placeholder-gray-500 text-sm
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+              transition-colors
+              ${error ? "border-red-500" : "border-gray-700"}
+            `}
+          />
+        </div>
+
         {/* Error */}
         {error && (
           <div className="flex items-start gap-2 bg-red-950/60 border border-red-800 rounded-lg px-3 py-2.5">
@@ -128,7 +180,7 @@ export function LoginForm() {
         {/* Submit */}
         <button
           type="submit"
-          disabled={loading || !email.trim() || !password.trim()}
+          disabled={loading || !canSubmit}
           className="
             w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700
             text-white font-medium py-2.5 px-4 rounded-lg text-sm
@@ -143,16 +195,16 @@ export function LoginForm() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              Signing in…
+              Creating account…
             </>
-          ) : "Sign in"}
+          ) : "Create account"}
         </button>
       </div>
 
       <p className="text-center text-xs text-gray-500">
-        Don&apos;t have an account?{" "}
-        <a href="/register" className="text-blue-400 hover:text-blue-300 transition-colors">
-          Create one
+        Already have an account?{" "}
+        <a href="/login" className="text-blue-400 hover:text-blue-300 transition-colors">
+          Sign in
         </a>
       </p>
     </form>

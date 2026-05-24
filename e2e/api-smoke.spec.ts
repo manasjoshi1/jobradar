@@ -16,7 +16,7 @@ let authCookies: Array<{ name: string; value: string; domain: string; path: stri
 
 test.beforeAll(async ({ playwright }) => {
   const ctx = await playwright.request.newContext({ baseURL: "http://127.0.0.1:3000" });
-  const res = await ctx.post("/api/auth/login", { data: { password: "JobRadarE2E!" } });
+  const res = await ctx.post("/api/auth/login", { data: { email: "e2e@jobradar.test", password: "JobRadarE2E!" } });
 
   if (!res.ok()) {
     throw new Error(`Login failed during API smoke setup: ${res.status()} ${await res.text()}`);

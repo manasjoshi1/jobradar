@@ -4,6 +4,7 @@
  */
 import { type Page, expect } from "@playwright/test";
 
+export const E2E_EMAIL    = "e2e@jobradar.test";
 export const E2E_PASSWORD = "JobRadarE2E!";
 export const E2E_USER_NAME = "Default User";
 
@@ -11,8 +12,9 @@ export const E2E_USER_NAME = "Default User";
  * Log in via the /login page.
  * After success the browser is on "/" (home).
  */
-export async function login(page: Page, password = E2E_PASSWORD) {
+export async function login(page: Page, email = E2E_EMAIL, password = E2E_PASSWORD) {
   await page.goto("/login");
+  await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: /sign in/i }).click();
 
@@ -24,9 +26,9 @@ export async function login(page: Page, password = E2E_PASSWORD) {
  * Log in via the API (faster, no browser interaction).
  * Returns the cookies so they can be added to the page context.
  */
-export async function loginViaApi(page: Page, password = E2E_PASSWORD) {
+export async function loginViaApi(page: Page, email = E2E_EMAIL, password = E2E_PASSWORD) {
   const res = await page.request.post("/api/auth/login", {
-    data: { password },
+    data: { email, password },
   });
 
   if (!res.ok()) {

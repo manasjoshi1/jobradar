@@ -214,6 +214,7 @@ model User {
   id           String   @id @default(cuid())
   email        String?  @unique
   name         String?
+  fullName     String?  // Display name from registration / onboarding
   passwordHash String?  // bcrypt hash; null = no login set yet
   isDefault    Boolean  @default(false)
   createdAt    DateTime @default(now())
@@ -225,8 +226,22 @@ model User {
   recommendations         UserJobRecommendation[]
   recommendationRuns      UserRecommendationRun[]
   preferences             UserJobPreference?
+  onboarding              UserOnboarding?
 
   @@index([isDefault])
+}
+
+model UserOnboarding {
+  id                  String    @id @default(cuid())
+  userId              String    @unique
+  onboardingCompleted Boolean   @default(false)
+  onboardingVersion   Int       @default(1)
+  prefsJson           String?   // JSON blob of onboarding wizard answers
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
 }
 
 model UserRoleProfile {

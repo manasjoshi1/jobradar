@@ -28,6 +28,8 @@ export type SessionPayload = JWTPayload & {
   sub: string;        // userId
   name: string | null;
   isDefault: boolean;
+  /** Undefined on legacy sessions — treat as true (already-onboarded users). */
+  onboardingCompleted?: boolean;
 };
 
 // ── Sign / Verify ─────────────────────────────────────────────────────────────
