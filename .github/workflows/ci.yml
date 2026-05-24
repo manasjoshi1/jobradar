@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  # ── Job 1: Lint + Build + E2E ────────────────────────────────────────────
+  test:
+    name: Lint · Build · E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # ── E2E database (isolated from any production DB) ──────────────────
+      DATABASE_URL: "file:./prisma/e2e.db"
+      # ── Auth / sessions ──────────────────────────────────────────────────
+      SESSION_SECRET: "ci-e2e-session-secret-minimum-32-chars-xx"
+      COOKIE_SECURE: "false"
+      # ── Disable scheduler & external notifications ───────────────────────
+      ENABLE_SCHEDULER: "false"
+      NOTIFICATIONS_ENABLED: "false"
+      ALL_NEW_JOBS_NOTIFICATIONS_ENABLED: "false"
+      NOTIFICATION_CHANNEL: "none"
+      # ── E2E mode flags ────────────────────────────────────────────────────
+      NODE_ENV: "test"
+      E2E_TEST: "true"
+      # ── Point at fixture config, not production YAML ──────────────────────
+      CONFIG_DIR: "./config/e2e"
+      # ── Sync (unused in E2E but silences startup warnings) ────────────────
+      SYNC_FETCH_CONCURRENCY: "2"
+      SYNC_DB_CONCURRENCY: "1"
+      SOURCE_FETCH_TIMEOUT_MS: "3000"
+      SOURCE_FETCH_RETRIES: "0"
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Node.js setup with npm cache ───────────────────────────────────
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # ── 3. Install dependencies ───────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 4. Generate Prisma client ─────────────────────────────────────────
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # ── 5. Lint ───────────────────────────────────────────────────────────
+      - name: Lint
+        run: npm run lint
+
+      # ── 6. TypeScript build (also validates schema) ───────────────────────
+      - name: Build
+        run: npm run build
+
+      # ── 7. Validate Prisma schema ─────────────────────────────────────────
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      # ── 8. Create E2E SQLite DB ───────────────────────────────────────────
+      - name: Create E2E database
+        run: |
+          rm -f prisma/e2e.db
+          npx prisma migrate deploy
+
+      # ── 9. Seed E2E data ──────────────────────────────────────────────────
+      - name: Seed E2E data
+        run: node scripts/e2e-seed.mjs
+
+      # ── 10. Install Playwright browsers (Chromium only) ───────────────────
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # ── 11. Run E2E tests (app started by start-server-and-test) ──────────
+      - name: Run E2E tests
+        run: npm run ci:e2e
+
+      # ── 12. Upload Playwright report & artifacts on failure ───────────────
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Upload test results (traces / screenshots / videos)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 7
+
+  # ── Job 2: Docker build validation ───────────────────────────────────────
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: jobradar:ci
+          # Use layer cache from the GitHub Actions cache
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Dockerfile sets NODE_ENV=production in the runner stage directly
