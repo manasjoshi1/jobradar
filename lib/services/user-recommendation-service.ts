@@ -54,16 +54,29 @@ export async function runUserRecommendations(
   let errorSummary: string | undefined;
 
   try {
+    // If user has UserJobSource rows, filter jobs to only those sources
+    const userSourceRows = await prisma.userJobSource.findMany({
+      where: { userId: resolvedUserId, enabled: true },
+      select: { sourceId: true },
+    });
+    // If user has source preferences, only score jobs from those sources
+    // If no UserJobSource rows, score all jobs (backward compat)
+    const allowedSourceIds = userSourceRows.length > 0
+      ? new Set(userSourceRows.map(r => r.sourceId))
+      : null;
+
     // Load jobs in window
     const jobs = await prisma.job.findMany({
       where: {
         isActive:      true,
         effectiveNewAt: { gte: windowStart, lte: windowEnd },
+        ...(allowedSourceIds ? { sourceId: { in: [...allowedSourceIds] } } : {}),
       },
       select: {
         id: true, title: true, company: true, location: true,
         department: true, employmentType: true, description: true,
         sponsorship: true, postedAt: true, firstSeenAt: true, effectiveNewAt: true,
+        sourceId: true,
       },
     });
     jobsScanned = jobs.length;
