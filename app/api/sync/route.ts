@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchJobsFromSource } from "@/lib/providers";
 import { detectSponsorship } from "@/lib/sponsorship";
+import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,9 @@ export async function POST() {
 }
 
 async function syncJobs() {
+  // Recover any runs stuck RUNNING from previous crashes/restarts before starting new one
+  await recoverAbandonedRuns(30);
+
   const sources = await prisma.jobSource.findMany({
     where: { enabled: true },
     orderBy: [{ provider: "asc" }, { company: "asc" }],
@@ -52,6 +56,7 @@ async function syncJobs() {
     },
   });
 
+  try {
   for (const source of sources) {
     const sourceRun = await prisma.syncSourceRun.create({
       data: {
@@ -258,6 +263,15 @@ async function syncJobs() {
         : null,
     },
   });
+  } catch (fatalError) {
+    // Unexpected failure outside source loop — finalize run as FAILED so it doesn't stay RUNNING
+    const msg = fatalError instanceof Error ? fatalError.message : String(fatalError);
+    await prisma.syncRun.update({
+      where: { id: syncRun.id },
+      data: { status: "FAILED", finishedAt: new Date(), errorSummary: truncate(msg, 2_000) },
+    }).catch(() => { /* best effort */ });
+    throw fatalError;
+  }
 
   return NextResponse.json(summary);
 }

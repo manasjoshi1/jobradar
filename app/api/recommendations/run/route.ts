@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { runRecommendations } from "@/lib/services/recommendation-service";
+import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export async function POST(request: NextRequest) {
       168, // max 7 days
     );
 
+    await recoverAbandonedRuns(30);
     const result = await runRecommendations(windowHours);
     return NextResponse.json(result);
   } catch (err) {

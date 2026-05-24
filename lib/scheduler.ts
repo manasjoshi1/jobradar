@@ -7,6 +7,7 @@
  */
 import cron from "node-cron";
 import { runRecommendations } from "@/lib/services/recommendation-service";
+import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
 
 let isRunning = false;
 let isScheduled = false;
@@ -21,6 +22,9 @@ async function runHourlyJob() {
   console.log("[scheduler] Starting hourly job at", new Date().toISOString());
 
   try {
+    // Recover any runs abandoned by previous crashes before starting new ones
+    await recoverAbandonedRuns(30);
+
     // Sync jobs
     const { prisma } = await import("@/lib/prisma");
     const { fetchJobsFromSource } = await import("@/lib/providers");

@@ -206,8 +206,11 @@ async function importRoleProfiles(cfg: RoleProfilesConfig): Promise<void> {
 async function main() {
   console.log("🚀 JobRadar config import starting...\n");
 
-  const sourcesPath = "config/job-sources.yml";
-  const profilesPath = "config/role-profiles.yml";
+  // Support CONFIG_DIR env var so Docker (/app/config) and local (./config) both work.
+  const configDir = process.env.CONFIG_DIR ?? "config";
+  const sourcesPath = path.join(configDir, "job-sources.yml");
+  const profilesPath = path.join(configDir, "role-profiles.yml");
+  console.log(`   Config dir: ${path.resolve(configDir)}\n`);
 
   let sourcesImported = false;
   let profilesImported = false;

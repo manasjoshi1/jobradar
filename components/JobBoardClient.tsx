@@ -1405,7 +1405,7 @@ export function JobBoardClient({
                               <td className="px-4 py-3 text-white">{timeAgo(run.startedAt)}<br /><span className="text-xs text-blue-300/60">{new Date(run.startedAt).toLocaleString()}</span></td>
                               <td className="px-4 py-3 text-slate-300">{run.durationMs != null ? `${(run.durationMs / 1000).toFixed(1)}s` : "—"}</td>
                               <td className="px-4 py-3">
-                                <span className={`font-semibold ${run.status === "SUCCESS" ? "text-emerald-400" : run.status === "PARTIAL_FAILURE" ? "text-amber-400" : "text-red-400"}`}>{run.status}</span>
+                                <RunStatusBadge status={run.status} startedAt={run.startedAt} />
                               </td>
                               <td className="px-4 py-3 text-white">{run.sourcesSucceeded}<span className="text-slate-500">/</span><span className="text-red-400">{run.sourcesFailed}</span></td>
                               <td className="px-4 py-3 text-emerald-300">{run.jobsCreated}</td>
@@ -1496,7 +1496,7 @@ export function JobBoardClient({
                             <td className="px-4 py-3 text-slate-300">{run.windowHours}h</td>
                             <td className="px-4 py-3 text-slate-300">{run.durationMs != null ? `${(run.durationMs / 1000).toFixed(1)}s` : "—"}</td>
                             <td className="px-4 py-3">
-                              <span className={`font-semibold ${run.status === "SUCCESS" ? "text-emerald-400" : run.status === "FAILED" ? "text-red-400" : "text-amber-400"}`}>{run.status}</span>
+                              <RunStatusBadge status={run.status} startedAt={run.startedAt} />
                             </td>
                             <td className="px-4 py-3 text-white">{run.jobsScanned}</td>
                             <td className="px-4 py-3 text-emerald-300">{run.recommendationsCreated}</td>
@@ -1729,6 +1729,32 @@ export function JobBoardClient({
 }
 
 // ── helper ─────────────────────────────────────────────────────────────────
+
+/** Returns a status badge element for a run row. RUNNING rows older than 30 min show as "Stale?" */
+function RunStatusBadge({ status, startedAt }: { status: string; startedAt: string }) {
+  const ageMs = new Date().getTime() - new Date(startedAt).getTime();
+  const isOldRunning = status === "RUNNING" && ageMs > 30 * 60 * 1000;
+
+  if (isOldRunning) {
+    return (
+      <span className="font-semibold text-amber-400 flex items-center gap-1">
+        ⚠ Stale
+        <span className="text-xs text-amber-400/60">(stuck RUNNING)</span>
+      </span>
+    );
+  }
+
+  const color =
+    status === "SUCCESS"
+      ? "text-emerald-400"
+      : status === "RUNNING"
+        ? "text-blue-400 animate-pulse"
+        : status === "PARTIAL_FAILURE"
+          ? "text-amber-400"
+          : "text-red-400";
+
+  return <span className={`font-semibold ${color}`}>{status}</span>;
+}
 
 function timeAgo(iso: string | null | undefined): string {
   if (!iso) return "unknown";
