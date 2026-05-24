@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 
 export function LoginForm() {
-  const router = useRouter();
   const passwordRef = useRef<HTMLInputElement>(null);
 
   const [password, setPassword] = useState("");
@@ -29,8 +27,8 @@ export function LoginForm() {
       });
 
       if (res.ok) {
-        router.replace("/");
-        router.refresh();
+        // Hard redirect so the proxy re-evaluates the new session cookie
+        window.location.href = "/";
       } else {
         const data = await res.json() as { error?: string };
         setError(data.error ?? "Login failed");
