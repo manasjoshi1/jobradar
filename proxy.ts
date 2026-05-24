@@ -4,9 +4,14 @@ import { getSessionFromRequest, redirectToLogin } from "@/lib/auth";
 // Routes that are always public (no auth required)
 const PUBLIC_PATHS = new Set(["/login", "/register", "/favicon.ico"]);
 
-// Next.js static files, image optimizer, and all auth API endpoints are always public
+// Next.js static files, image optimizer, and all auth API endpoints are always public.
+// /api/health is also public — it's a liveness probe used by the deploy script.
 function isNextInternal(pathname: string): boolean {
-  return pathname.startsWith("/_next/") || pathname.startsWith("/api/auth/");
+  return (
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/api/auth/") ||
+    pathname === "/api/health"
+  );
 }
 
 export async function proxy(req: NextRequest) {

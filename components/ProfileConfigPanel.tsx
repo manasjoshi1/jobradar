@@ -740,8 +740,18 @@ function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
         </button>
 
         {importResult && (
-          <div className={`rounded-lg p-3 text-xs space-y-1 ${importResult.ok ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-red-500/10 border border-red-500/20"}`}>
-            {importResult.ok && <p className="text-emerald-400 font-medium">Import successful</p>}
+          <div
+            role="status"
+            className={`rounded-lg p-3 text-xs space-y-1 ${importResult.ok ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-red-500/10 border border-red-500/20"}`}
+          >
+            {importResult.ok && (
+              <p
+                data-testid="profile-config-import-success"
+                className="text-emerald-400 font-medium"
+              >
+                Import successful
+              </p>
+            )}
             {importResult.imported && (
               <pre className="text-slate-300">{JSON.stringify(importResult.imported, null, 2)}</pre>
             )}

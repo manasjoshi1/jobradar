@@ -1,7 +1,33 @@
-# Production overrides for EC2 deployment.
-# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+# Production-only compose file.
+# Pulls the pre-built GHCR image — never builds locally.
+#
+# Usage on EC2:
+#   docker compose -f docker-compose.prod.yml pull jobradar
+#   docker compose -f docker-compose.prod.yml up -d --remove-orphans
+#
+# Verify the running image:
+#   docker inspect -f '{{.Config.Image}}' jobradar
+#   # expected: ghcr.io/manasjoshi1/jobradar:latest
+#
+# Health check:
+#   curl -fsS http://localhost/api/health
+
 services:
   jobradar:
+    image: ghcr.io/manasjoshi1/jobradar:latest
+    container_name: jobradar
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "file:/app/data/jobradar.db"
+      NODE_ENV: "production"
+      NODE_OPTIONS: "--max-old-space-size=640"
+      ENABLE_SCHEDULER: "true"
     ports:
-      - "80:3000"
-    restart: always
+      # Bind to loopback only — nginx proxies public traffic on port 80/443.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./data:/app/data
+    mem_limit: 750m
+    memswap_limit: 750m

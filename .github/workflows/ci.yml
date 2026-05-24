@@ -95,10 +95,12 @@ jobs:
           retention-days: 7
 
   # ── Job 2: Docker build + publish ────────────────────────────────────────
+  # Gated on test — image is only pushed after lint/build/E2E pass.
   docker-build:
     name: Docker build · publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: [test]
 
     permissions:
       contents: read
@@ -210,38 +212,39 @@ jobs:
             set -euo pipefail
 
             APP_DIR="${{ secrets.EC2_APP_DIR }}"
+            COMPOSE="docker compose -f docker-compose.prod.yml"
 
             echo "==> Deploying to $APP_DIR"
             cd "$APP_DIR"
 
-            echo "==> Fetching latest code..."
+            echo "==> Fetching latest code (includes docker-compose.prod.yml)..."
             git fetch origin
             git reset --hard FETCH_HEAD
 
-            echo "==> Pulling latest image from ghcr.io..."
-            docker compose pull
+            echo "==> Pulling GHCR image..."
+            $COMPOSE pull jobradar
 
             echo "==> Restarting container from pulled image..."
-            docker compose up -d
+            $COMPOSE up -d --remove-orphans
 
             echo "==> Waiting for container to become ready..."
             sleep 15
 
+            echo "==> Verify running image (must be ghcr.io, not local build)..."
+            docker inspect -f '{{.Config.Image}}' jobradar
+
             echo "==> Running deploy bootstrap..."
-            docker compose exec -T jobradar npm run deploy:bootstrap
+            $COMPOSE exec -T jobradar npm run deploy:bootstrap
 
             echo "==> Container status:"
-            docker compose ps
+            $COMPOSE ps
 
-            echo "==> Health check: Next.js API..."
-            curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost/api/auth/me || true
+            echo "==> Health check..."
+            HTTP_CODE=$(curl -fsS -o /dev/null -w "%{http_code}" http://localhost/api/health || echo "000")
 
-            echo "==> Health check: nginx / root..."
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost)
-
-            if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 500 ]; then
-              echo "ERROR: health check failed — HTTP $HTTP_CODE"
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "ERROR: /api/health returned HTTP $HTTP_CODE (expected 200)"
               exit 1
             fi
 
-            echo "==> Deploy complete! HTTP $HTTP_CODE"
+            echo "==> Deploy complete! /api/health → HTTP $HTTP_CODE"
