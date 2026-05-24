@@ -14,6 +14,8 @@
  */
 
 import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -40,8 +42,14 @@ function run(label, cmd) {
 // ── 1. Migrations ─────────────────────────────────────────────────────────────
 run('prisma migrate deploy', 'npx prisma migrate deploy');
 
-// ── 2. Config import ──────────────────────────────────────────────────────────
-run('config:import (sources + profiles)', 'npm run config:import --silent');
+// ── 2. Config import (only if YAML files present on this server) ──────────────
+const configImportNeeded = fs.existsSync(path.join(process.cwd(), 'config', 'job-sources.yml'));
+if (configImportNeeded) {
+  console.log('\n[2] Importing YAML config files...');
+  run('config:import (sources + profiles)', 'npm run config:import --silent');
+} else {
+  console.log('\n[2] No config/job-sources.yml found — skipping YAML import (config is in DB)');
+}
 
 // ── 3. Backfill effectiveNewAt ────────────────────────────────────────────────
 run('backfill effectiveNewAt', 'node scripts/backfill-effective-new-at.mjs');
@@ -53,7 +61,13 @@ run('recover abandoned runs (threshold 10m)', 'node scripts/recover-abandoned-ru
 run('seed default user + notification prefs', 'node scripts/seed-default-user.mjs');
 
 // ── 6. Import user config (role profiles + preferences) ──────────────────────
-run('import user config', 'node scripts/import-user-config.mjs --file ./config/users/default-user.yml');
+const userConfigPath = path.join(process.cwd(), 'config', 'users', 'default-user.yml');
+if (fs.existsSync(userConfigPath)) {
+  console.log('\n[6] Importing user config YAML...');
+  run('import user config', `node scripts/import-user-config.mjs --file ${userConfigPath}`);
+} else {
+  console.log('\n[6] No user YAML found — skipping (config is in DB)');
+}
 
 // ── 7. Migrate existing global data to default user ──────────────────────────
 run('migrate global data to default user', 'node scripts/migrate-default-user.mjs');
