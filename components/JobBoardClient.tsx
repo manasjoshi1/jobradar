@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SponsorshipBadge, StatusBadge } from "@/components/badges";
+import { ProfileConfigPanel } from "@/components/ProfileConfigPanel";
 import type { JobStatus, Sponsorship } from "@/lib/types";
 
 export type JobBoardJob = {
@@ -2096,90 +2097,8 @@ export function JobBoardClient({
               </div>
             </div>
 
-            {/* Job Preferences */}
-            {currentUser.preferences && (
-              <div className="rounded-xl bg-slate-800/60 border border-blue-500/20 p-5">
-                <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                  <span className="text-blue-400">⚙️</span> Job Preferences
-                </h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-blue-300/60 text-xs mb-1">Min Score</p>
-                    <p className="text-white font-semibold">{currentUser.preferences.minScore}</p>
-                  </div>
-                  <div>
-                    <p className="text-blue-300/60 text-xs mb-1">Sponsorship Required</p>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${currentUser.preferences.requiresSponsorship ? "bg-amber-500/20 text-amber-300" : "bg-slate-600 text-slate-300"}`}>
-                      {currentUser.preferences.requiresSponsorship ? "Yes (OPT/H1B)" : "No"}
-                    </span>
-                  </div>
-                  {Array.isArray(currentUser.preferences.preferredCompanies) && currentUser.preferences.preferredCompanies.length > 0 && (
-                    <div className="col-span-2">
-                      <p className="text-blue-300/60 text-xs mb-1">Preferred Companies</p>
-                      <div className="flex flex-wrap gap-1">
-                        {(currentUser.preferences.preferredCompanies as string[]).slice(0, 10).map((c) => (
-                          <span key={c} className="text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-full">{c}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {Array.isArray(currentUser.preferences.blockedCompanies) && currentUser.preferences.blockedCompanies.length > 0 && (
-                    <div className="col-span-2">
-                      <p className="text-blue-300/60 text-xs mb-1">Blocked Companies</p>
-                      <div className="flex flex-wrap gap-1">
-                        {(currentUser.preferences.blockedCompanies as string[]).slice(0, 10).map((c) => (
-                          <span key={c} className="text-xs bg-red-500/10 text-red-300 border border-red-500/20 px-2 py-0.5 rounded-full">{c}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {Array.isArray(currentUser.preferences.targetLocations) && (
-                    <div className="col-span-2">
-                      <p className="text-blue-300/60 text-xs mb-1">Target Locations
-                        <span className="ml-1 text-slate-500">({(currentUser.preferences.targetLocations as string[]).length} entries)</span>
-                      </p>
-                      <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-                        {(currentUser.preferences.targetLocations as string[]).slice(0, 20).map((l) => (
-                          <span key={l} className="text-xs bg-blue-500/10 text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded-full">{l}</span>
-                        ))}
-                        {(currentUser.preferences.targetLocations as string[]).length > 20 && (
-                          <span className="text-xs text-blue-300/40">+{(currentUser.preferences.targetLocations as string[]).length - 20} more</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Role Profiles */}
-            {Array.isArray(currentUser.roleProfiles) && currentUser.roleProfiles.length > 0 && (
-              <div className="rounded-xl bg-slate-800/60 border border-blue-500/20 p-5">
-                <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                  <span className="text-purple-400">🎯</span> Role Profiles
-                  <span className="text-xs text-slate-500 font-normal">
-                    {(currentUser.roleProfiles as Array<{enabled: boolean}>).filter(p => p.enabled).length} enabled / {currentUser.roleProfiles.length} total
-                  </span>
-                </h3>
-                <div className="space-y-2">
-                  {(currentUser.roleProfiles as Array<{id: string; name: string; enabled: boolean; priority: number; minScore: number}>).map((p) => (
-                    <div key={p.id} className={`flex items-center justify-between rounded-lg px-3 py-2.5 border ${p.enabled ? "bg-slate-700/40 border-slate-600/40" : "bg-slate-800/20 border-slate-700/20 opacity-50"}`}>
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${p.enabled ? "bg-emerald-400" : "bg-slate-600"}`} />
-                        <span className="text-sm text-white truncate">{p.name}</span>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0 ml-2 text-xs text-blue-300/50">
-                        <span>p{p.priority}</span>
-                        <span>min {p.minScore}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-500 mt-3">
-                  To update profiles, edit your YAML config and run: <code className="text-blue-400 bg-slate-700/50 px-1 rounded">npm run users:import-config</code>
-                </p>
-              </div>
-            )}
+            {/* Editable config panel */}
+            <ProfileConfigPanel />
           </div>
         )}
 
