@@ -1,99 +1,57 @@
 /**
- * Hourly scheduler using node-cron.
+ * Scheduler — every 30 minutes.
  * Only starts when ENABLE_SCHEDULER=true (Docker production).
- * Defaults to false in development to prevent hot-reload duplicates.
  *
- * Uses an in-memory lock to prevent overlapping runs.
+ * Pipeline per run:
+ *   1. Recover abandoned sync runs
+ *   2. Sync jobs from all sources
+ *   3. Score jobs against role profiles (48h window)
+ *   4. Send notification for any unnotified unique jobs (self-managed by service)
  */
 import cron from "node-cron";
 import { runRecommendations } from "@/lib/services/recommendation-service";
 import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
 import { runSync } from "@/lib/services/sync-service";
+import { sendRecommendationNotification } from "@/lib/services/notification-service";
 
-let isRunning = false;
+let isRunning  = false;
 let isScheduled = false;
 
-async function runHourlyJob() {
+async function runScheduledJob() {
   if (isRunning) {
     console.log("[scheduler] Skipping — previous run still in progress");
     return;
   }
 
   isRunning = true;
-  console.log("[scheduler] Starting hourly job at", new Date().toISOString());
+  console.log("[scheduler] Run started at", new Date().toISOString());
 
   try {
-    // Recover any runs abandoned by previous crashes before starting new ones
+    // 1. Recover abandoned runs
     await recoverAbandonedRuns(30);
 
-    // Sync jobs (parallel fetch, serialised DB writes)
+    // 2. Sync jobs
     const syncResult = await runSync();
     console.log(
-      `[scheduler] Sync done — created=${syncResult.jobsCreated} updated=${syncResult.jobsUpdated} stale=${syncResult.jobsMarkedStale} failed=${syncResult.sourcesFailed}/${syncResult.sourcesProcessed} (${(syncResult.durationMs / 1000).toFixed(1)}s)`,
+      `[scheduler] Sync done — created=${syncResult.jobsCreated} updated=${syncResult.jobsUpdated} ` +
+      `stale=${syncResult.jobsMarkedStale} failed=${syncResult.sourcesFailed}/${syncResult.sourcesProcessed} ` +
+      `(${(syncResult.durationMs / 1000).toFixed(1)}s)`,
     );
 
-    // Run recommendations — 48h window so every fresh job gets scored each run
+    // 3. Score recommendations (48h window catches all recent jobs)
     const recResult = await runRecommendations(48);
     console.log(
-      `[scheduler] Recommendations done — scanned=${recResult.jobsScanned} created=${recResult.recommendationsCreated} updated=${recResult.recommendationsUpdated}`,
+      `[scheduler] Recs done — scanned=${recResult.jobsScanned} ` +
+      `created=${recResult.recommendationsCreated} updated=${recResult.recommendationsUpdated}`,
     );
 
-    const { sendRecommendationNotification } = await import(
-      "@/lib/services/notification-service"
-    );
-    const { prisma } = await import("@/lib/prisma");
-
-    // Check how long ago we last successfully sent a notification
-    const lastSent = await prisma.notificationDelivery.findFirst({
-      where: { status: "SENT" },
-      orderBy: { sentAt: "desc" },
-      select: { sentAt: true },
-    });
-    const hoursSinceLastSent = lastSent?.sentAt
-      ? (Date.now() - new Date(lastSent.sentAt).getTime()) / (1000 * 60 * 60)
-      : 999;
-
-    // Fetch ALL current UNSEEN recommendations (not just from this run)
-    const unseenRecs = await prisma.jobRecommendation.findMany({
-      where: { status: "UNSEEN" },
-      take: 50,
-      orderBy: { score: "desc" },
-      select: {
-        score: true,
-        job: { select: { company: true, title: true, applyUrl: true } },
-        roleProfile: { select: { name: true } },
-      },
-    });
-
-    // Send if: new recs created this run, OR unseen recs exist and it's been
-    // at least 1h since the last notification (match the run cadence).
-    const shouldNotify =
-      recResult.recommendationsCreated > 0 ||
-      (unseenRecs.length > 0 && hoursSinceLastSent >= 1);
-
-    if (shouldNotify) {
-      await sendRecommendationNotification({
-        windowHours: 24,
-        recommendationRunId: recResult.runId,
-        newRecommendations: unseenRecs,
-      });
-      console.log(
-        `[scheduler] Notification sent — ${unseenRecs.length} unseen recs (newThisRun=${recResult.recommendationsCreated}, hoursSinceLast=${hoursSinceLastSent.toFixed(1)})`,
-      );
-    } else {
-      console.log(
-        `[scheduler] Notification skipped — ${unseenRecs.length} unseen, ${hoursSinceLastSent.toFixed(1)}h since last sent`,
-      );
-      await sendRecommendationNotification({
-        windowHours: 24,
-        recommendationRunId: recResult.runId,
-        newRecommendations: [],
-      });
-    }
+    // 4. Notify — service queries its own unnotified recs, groups by job, dedupes
+    await sendRecommendationNotification({ recommendationRunId: recResult.runId });
   } catch (err) {
-    console.error("[scheduler] Hourly job failed:", err);
+    console.error("[scheduler] Run failed:", err);
   } finally {
     isRunning = false;
+    console.log("[scheduler] Run finished at", new Date().toISOString());
   }
 }
 
@@ -105,12 +63,12 @@ export function startScheduler() {
   }
 
   isScheduled = true;
-  // Run every 30 minutes — max lag from job posting to your notification is ~30 min
+  // Every 30 minutes — max ~30 min lag from job posting to notification
   cron.schedule("*/30 * * * *", () => {
-    runHourlyJob().catch((err) =>
+    runScheduledJob().catch((err) =>
       console.error("[scheduler] Unhandled error:", err),
     );
   });
 
-  console.log("[scheduler] Started — running every 30 min at :00 and :30");
+  console.log("[scheduler] Started — every 30 min (:00 and :30)");
 }

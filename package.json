@@ -14,7 +14,9 @@
     "config:import": "tsx scripts/config-import.ts",
     "db:backfill-effective-new-at": "node scripts/backfill-effective-new-at.mjs",
     "runs:recover": "node scripts/recover-abandoned-runs.mjs",
-    "deploy:bootstrap": "node scripts/deploy-bootstrap.mjs"
+    "deploy:bootstrap": "node scripts/deploy-bootstrap.mjs",
+    "db:seed-user": "node scripts/seed-default-user.mjs",
+    "db:investigate": "node scripts/investigate-duplicates.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

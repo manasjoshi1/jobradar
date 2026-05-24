@@ -49,6 +49,9 @@ run('backfill effectiveNewAt', 'node scripts/backfill-effective-new-at.mjs');
 // ── 4. Recover abandoned runs ─────────────────────────────────────────────────
 run('recover abandoned runs (threshold 10m)', 'node scripts/recover-abandoned-runs.mjs -- --threshold-minutes 10');
 
+// ── 5. Seed default user + migrate notification prefs ─────────────────────────
+run('seed default user + notification prefs', 'node scripts/seed-default-user.mjs');
+
 // ── Final summary ─────────────────────────────────────────────────────────────
 console.log('\n═══════════════════════════════════════════════');
 console.log('  Deploy bootstrap complete — DB snapshot');
@@ -64,6 +67,8 @@ const [
   totalRecs,
   runningSyncRuns,
   runningRecRuns,
+  defaultUser,
+  unnotifiedRecs,
 ] = await Promise.all([
   prisma.job.count(),
   prisma.job.count({ where: { isActive: true } }),
@@ -74,6 +79,8 @@ const [
   prisma.jobRecommendation.count(),
   prisma.syncRun.count({ where: { status: 'RUNNING' } }),
   prisma.recommendationRun.count({ where: { status: 'RUNNING' } }),
+  prisma.user.findFirst({ where: { isDefault: true }, select: { id: true, name: true } }),
+  prisma.jobRecommendation.count({ where: { notifiedAt: null, status: 'UNSEEN' } }),
 ]);
 
 const nullEffective = await prisma.job.count({ where: { effectiveNewAt: null } });
@@ -82,7 +89,8 @@ console.log(`  Jobs              : ${activeJobs} active / ${totalJobs} total`);
 console.log(`  Null effectiveNewAt: ${nullEffective}`);
 console.log(`  JobSources        : ${enabledSources} enabled / ${totalSources} total`);
 console.log(`  RoleProfiles      : ${enabledProfiles} enabled / ${totalProfiles} total`);
-console.log(`  Recommendations   : ${totalRecs} total`);
+console.log(`  Recommendations   : ${totalRecs} total (${unnotifiedRecs} unnotified)`);
+console.log(`  Default User      : ${defaultUser ? `${defaultUser.name} (${defaultUser.id})` : 'none'}`);
 console.log(`  RUNNING SyncRuns  : ${runningSyncRuns}`);
 console.log(`  RUNNING RecRuns   : ${runningRecRuns}`);
 console.log('═══════════════════════════════════════════════\n');

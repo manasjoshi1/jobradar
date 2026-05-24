@@ -38,6 +38,9 @@ model Job {
   postedAt       DateTime?
   effectiveNewAt DateTime?
 
+  /// Normalized fingerprint for cross-source deduplication: provider|externalId or company|title|location
+  jobFingerprint String?
+
   sponsorship String @default("UNKNOWN")
   status      String @default("NEW")
 
@@ -58,6 +61,7 @@ model Job {
   @@index([effectiveNewAt])
   @@index([isActive, postedAt])
   @@index([isActive, effectiveNewAt])
+  @@index([jobFingerprint])
 }
 
 model SyncRun {
@@ -125,8 +129,12 @@ model JobRecommendation {
   matched   String // JSON array
   negatives String // JSON array
 
-  status        String   @default("UNSEEN") // UNSEEN, SEEN, SAVED, APPLIED, SKIPPED
-  recommendedAt DateTime @default(now())
+  status        String    @default("UNSEEN") // UNSEEN, SEEN, SAVED, APPLIED, SKIPPED
+  recommendedAt DateTime  @default(now())
+
+  /// Set when this recommendation was included in a notification delivery
+  notifiedAt             DateTime?
+  notificationDeliveryId String?
 
   job         Job         @relation(fields: [jobId], references: [id])
   roleProfile RoleProfile @relation(fields: [roleProfileId], references: [id])
@@ -136,6 +144,8 @@ model JobRecommendation {
   @@index([status, recommendedAt])
   @@index([roleProfileId, recommendedAt])
   @@index([status])
+  @@index([notifiedAt])
+  @@index([jobId, status])
 }
 
 model RecommendationRun {
@@ -171,4 +181,47 @@ model NotificationDelivery {
   @@index([channel, createdAt])
   @@index([status, createdAt])
   @@index([recommendationRunId])
+}
+
+// ── User foundation (single-tenant for now, multi-user ready) ────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  name      String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notificationPreferences UserNotificationPreference[]
+
+  @@index([isDefault])
+}
+
+model UserNotificationPreference {
+  id      String @id @default(cuid())
+  userId  String
+  channel String // SLACK, TELEGRAM, DISCORD
+
+  enabled Boolean @default(false)
+
+  slackWebhookUrl   String?
+  telegramBotToken  String?
+  telegramChatId    String?
+  discordWebhookUrl String?
+
+  /// How far back to look for unnotified recommendations
+  lookbackHours     Int @default(24)
+  /// Max unique jobs per notification message
+  maxJobs           Int @default(10)
+  /// Max jobs from same company in one notification
+  maxJobsPerCompany Int @default(2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, channel])
+  @@index([userId])
 }

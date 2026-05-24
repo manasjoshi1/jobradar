@@ -142,11 +142,15 @@ export async function runRecommendations(
 
     // Write creates in a single createMany call
     if (creates.length > 0) {
-      await prisma.jobRecommendation.createMany({
-        data: creates.map((c) => ({ ...c, status: "UNSEEN" })),
-        skipDuplicates: true,
-      });
-      recommendationsCreated = creates.length;
+      // SQLite doesn't support skipDuplicates in createMany — use individual creates with error catch
+      for (const c of creates) {
+        try {
+          await prisma.jobRecommendation.create({ data: { ...c, status: "UNSEEN" } });
+          recommendationsCreated++;
+        } catch {
+          // Duplicate unique constraint — already exists, skip
+        }
+      }
     }
 
     // Write updates individually (Prisma SQLite doesn't support bulk update with different values)

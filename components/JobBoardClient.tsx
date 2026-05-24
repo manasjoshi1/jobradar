@@ -110,16 +110,38 @@ type Recommendation = {
   job: RecJob;
 };
 
+type RecCountBucket = {
+  last1h: number; last2h: number; last3h: number; last6h: number;
+  last12h: number; last1d: number; last2d: number; last7d: number;
+  unseen: number; unnotified: number;
+};
 type RecCounts = {
-  last1h: number;
-  last2h: number;
-  last3h: number;
-  last6h: number;
-  last12h: number;
-  last1d: number;
-  last2d: number;
-  last7d: number;
+  uniqueJobs:      RecCountBucket;
+  recommendations: RecCountBucket;
+  /** backwards-compat top-level unseen (unique job count) */
   unseen: number;
+};
+
+// Grouped recommendation type (returned by API with groupByJob=true)
+type MatchedProfile = {
+  recommendationId: string;
+  roleProfileId: string;
+  name: string;
+  score: number;
+  matched: string[];
+  negatives: string[];
+  reason: string | null;
+  status: string;
+};
+type GroupedJobRec = {
+  jobId: string;
+  job: RecJob;
+  bestScore: number;
+  bestRecommendationId: string;
+  bestRoleProfile: RoleProfileRef;
+  bestStatus: string;
+  recommendedAt: string;
+  matchedProfiles: MatchedProfile[];
 };
 
 const WINDOW_OPTIONS = ["1h","6h","1d","2d","7d","30d","all"] as const;
@@ -258,6 +280,7 @@ export function JobBoardClient({
 
   // Recommendation state
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [groupedRecs, setGroupedRecs] = useState<GroupedJobRec[]>([]);
   const [recTotal, setRecTotal] = useState(0);
   const [recTotalPages, setRecTotalPages] = useState(1);
   const [recPage, setRecPage] = useState(1);
@@ -375,6 +398,7 @@ export function JobBoardClient({
       page: String(recPage),
       pageSize: "25",
       window: recWindow,
+      groupByJob: "true",
     });
     if (mainTab === "alerts") {
       params.set("status", "UNSEEN");
@@ -387,9 +411,10 @@ export function JobBoardClient({
     if (recMinScore > 0) params.set("minScore", String(recMinScore));
 
     fetch(`/api/recommendations?${params}`, { signal: controller.signal })
-      .then((r) => r.json() as Promise<{ recommendations: Recommendation[]; total: number; totalPages: number }>)
+      .then((r) => r.json() as Promise<{ jobs: GroupedJobRec[]; total: number; totalPages: number; totalRecommendations: number }>)
       .then((d) => {
-        setRecommendations(d.recommendations);
+        setGroupedRecs(d.jobs ?? []);
+        setRecommendations([]);
         setRecTotal(d.total);
         setRecTotalPages(d.totalPages);
         setRecLoading(false);
@@ -541,6 +566,31 @@ export function JobBoardClient({
       });
       setRecommendations((prev) =>
         prev.map((r) => (r.id === recId ? { ...r, status } : r)),
+      );
+      fetchRecCounts();
+    } catch {
+      setRecError("Could not update recommendation status.");
+    }
+  }
+
+  /** Update status for ALL recommendations matching a jobId (grouped mode) */
+  async function updateJobRecStatus(jobId: string, status: RecStatus) {
+    try {
+      await fetch(`/api/recommendations/job-status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, status }),
+      });
+      setGroupedRecs((prev) =>
+        prev.map((g) =>
+          g.jobId === jobId
+            ? {
+                ...g,
+                bestStatus: status,
+                matchedProfiles: g.matchedProfiles.map((p) => ({ ...p, status })),
+              }
+            : g,
+        ),
       );
       fetchRecCounts();
     } catch {
@@ -725,7 +775,7 @@ export function JobBoardClient({
 
   const displayJobs = viewMode === "saved" ? jobs.filter(j => savedJobIds.has(j.id)) : jobs;
 
-  const unseenCount = recCounts?.unseen ?? 0;
+  const unseenCount = recCounts?.uniqueJobs?.unseen ?? recCounts?.unseen ?? 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
@@ -738,7 +788,7 @@ export function JobBoardClient({
                 JobRadar
               </h1>
               <p className="text-xs text-blue-300/60 mt-0.5">
-                {total.toLocaleString()} opportunities · {recCounts?.last1d ?? 0} new recommendations today
+                {total.toLocaleString()} opportunities · {recCounts?.uniqueJobs?.last1d ?? 0} new jobs recommended today
               </p>
             </div>
             <div className="flex gap-2">
@@ -820,7 +870,7 @@ export function JobBoardClient({
                   <>
                     <span className="text-3xl text-blue-400 font-extrabold tabular-nums">{recTotal}</span>
                     <span className="text-blue-300 text-sm ml-2">
-                      {mainTab === "alerts" ? "unseen recommendations" : "recommendations"}
+                      {mainTab === "alerts" ? "unseen jobs" : "unique jobs"}
                       {recWindow !== "all" && ` · last ${WINDOW_LABELS[recWindow]}`}
                     </span>
                   </>
@@ -957,10 +1007,10 @@ export function JobBoardClient({
               </div>
             </div>
 
-            {/* Rec list */}
+            {/* Rec list — one card per unique job */}
             {recLoading ? (
               <div className="text-center py-12 text-blue-300">🧠 Loading recommendations...</div>
-            ) : recommendations.length === 0 ? (
+            ) : groupedRecs.length === 0 ? (
               <div className="rounded-2xl bg-white/10 backdrop-blur border border-blue-500/30 p-12 text-center">
                 <p className="text-blue-300/70 mb-2">
                   {mainTab === "alerts" ? "No unseen recommendations." : "No recommendations for this filter."}
@@ -971,139 +1021,149 @@ export function JobBoardClient({
               </div>
             ) : (
               <div className="space-y-3">
-                {recommendations.map((rec) => (
-                  <div
-                    key={rec.id}
-                    className={`rounded-xl border p-4 backdrop-blur transition ${
-                      rec.status === "UNSEEN"
-                        ? "bg-blue-500/10 border-blue-500/40 hover:border-blue-500/60"
-                        : "bg-white/5 border-blue-500/20 hover:border-blue-500/40"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        {/* Score + title */}
-                        <div className="flex items-center gap-3 mb-1">
-                          <span className={`text-2xl font-bold tabular-nums ${
-                            rec.score >= 70 ? "text-emerald-400" : rec.score >= 50 ? "text-blue-400" : "text-amber-400"
-                          }`}>
-                            {rec.score}
-                          </span>
-                          <div>
-                            <h3 className="font-bold text-white text-sm">{rec.job.title}</h3>
-                            <p className="text-xs text-blue-300/70">{rec.job.company}
-                              {rec.job.location && ` · ${rec.job.location}`}
-                            </p>
-                          </div>
-                        </div>
+                {groupedRecs.map((g) => {
+                  const status = g.bestStatus as RecStatus;
+                  const otherProfiles = g.matchedProfiles.filter((p) => p.roleProfileId !== g.bestRoleProfile.id);
+                  const topKeywords = g.matchedProfiles[0]?.matched
+                    .filter((m) => !m.startsWith("title") && !m.startsWith("location") && !m.startsWith("fresh") && !m.startsWith("cluster") && m !== "sponsorship:yes")
+                    .slice(0, 6) ?? [];
 
-                        {/* Profile + timing */}
-                        <div className="flex flex-wrap gap-2 mb-2 text-xs">
-                          <span className="bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded">
-                            {rec.roleProfile.name}
-                          </span>
-                          {rec.job.postedAt && (
-                            <span className="text-blue-300/50">
-                              Posted: {timeAgo(rec.job.postedAt)}
+                  return (
+                    <div
+                      key={g.jobId}
+                      className={`rounded-xl border p-4 backdrop-blur transition ${
+                        status === "UNSEEN"
+                          ? "bg-blue-500/10 border-blue-500/40 hover:border-blue-500/60"
+                          : "bg-white/5 border-blue-500/20 hover:border-blue-500/40"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          {/* Score + title */}
+                          <div className="flex items-center gap-3 mb-1">
+                            <span className={`text-2xl font-bold tabular-nums ${
+                              g.bestScore >= 70 ? "text-emerald-400" : g.bestScore >= 50 ? "text-blue-400" : "text-amber-400"
+                            }`}>
+                              {g.bestScore}
                             </span>
-                          )}
-                          <span className="text-blue-300/50">
-                            Found: {timeAgo(rec.job.effectiveNewAt ?? rec.job.firstSeenAt)}
-                          </span>
-                          <span className={`px-2 py-0.5 rounded font-medium ${
-                            rec.job.sponsorship === "YES" ? "bg-emerald-500/20 text-emerald-300" :
-                            rec.job.sponsorship === "NO" ? "bg-rose-500/20 text-rose-300" :
-                            "bg-amber-500/20 text-amber-300"
-                          }`}>
-                            Visa: {rec.job.sponsorship}
-                          </span>
-                        </div>
+                            <div>
+                              <h3 className="font-bold text-white text-sm">{g.job.title}</h3>
+                              <p className="text-xs text-blue-300/70">{g.job.company}
+                                {g.job.location && ` · ${g.job.location}`}
+                              </p>
+                            </div>
+                          </div>
 
-                        {/* Matched keywords */}
-                        {rec.matched.filter(m => !m.startsWith("title:") && !m.startsWith("location:")).length > 0 && (
-                          <div className="flex flex-wrap gap-1 mb-2">
-                            {rec.matched
-                              .filter(m => !m.startsWith("title:") && !m.startsWith("location:"))
-                              .slice(0, 8)
-                              .map((kw) => (
+                          {/* Best profile + timing + sponsorship */}
+                          <div className="flex flex-wrap gap-2 mb-2 text-xs">
+                            <span className="bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-medium">
+                              ⭐ {g.bestRoleProfile.name}
+                            </span>
+                            {otherProfiles.length > 0 && (
+                              <span className="bg-blue-500/10 text-blue-300/70 px-2 py-0.5 rounded border border-blue-500/20" title={otherProfiles.map(p => `${p.name} (${p.score})`).join(", ")}>
+                                +{otherProfiles.length} profile{otherProfiles.length > 1 ? "s" : ""}
+                              </span>
+                            )}
+                            {g.job.postedAt && (
+                              <span className="text-blue-300/50">Posted: {timeAgo(g.job.postedAt)}</span>
+                            )}
+                            <span className="text-blue-300/50">
+                              Found: {timeAgo(g.job.effectiveNewAt ?? g.job.firstSeenAt)}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded font-medium ${
+                              g.job.sponsorship === "YES"  ? "bg-emerald-500/20 text-emerald-300" :
+                              g.job.sponsorship === "NO"   ? "bg-rose-500/20 text-rose-300" :
+                              "bg-amber-500/20 text-amber-300"
+                            }`}>
+                              Visa: {g.job.sponsorship}
+                            </span>
+                          </div>
+
+                          {/* Matched profiles (if >1) */}
+                          {otherProfiles.length > 0 && (
+                            <div className="mb-2 text-xs text-blue-300/60">
+                              Also matched:{" "}
+                              {otherProfiles.slice(0, 4).map((p) => (
+                                <span key={p.roleProfileId} className="inline-block mr-1.5 bg-white/5 border border-blue-500/15 rounded px-1.5 py-0.5">
+                                  {p.name} <span className="text-blue-400">{p.score}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Top keywords */}
+                          {topKeywords.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-2">
+                              {topKeywords.map((kw) => (
                                 <span key={kw} className="text-xs bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-1.5 py-0.5 rounded">
                                   {kw}
                                 </span>
                               ))}
-                          </div>
-                        )}
+                            </div>
+                          )}
 
-                        {/* Reason */}
-                        {rec.reason && (
-                          <p className="text-xs text-slate-400 italic">{rec.reason}</p>
-                        )}
+                          {/* Reason */}
+                          {g.matchedProfiles[0]?.reason && (
+                            <p className="text-xs text-slate-400 italic">{g.matchedProfiles[0].reason}</p>
+                          )}
+                        </div>
+
+                        {/* Status badge */}
+                        <div className="flex-shrink-0">
+                          <span className={`text-xs font-bold px-2 py-1 rounded ${
+                            status === "UNSEEN"  ? "bg-blue-500/30 text-blue-200" :
+                            status === "SEEN"    ? "bg-slate-500/30 text-slate-300" :
+                            status === "SAVED"   ? "bg-emerald-500/30 text-emerald-300" :
+                            status === "APPLIED" ? "bg-cyan-500/30 text-cyan-300" :
+                            "bg-slate-600/30 text-slate-400"
+                          }`}>
+                            {status}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Status badge */}
-                      <div className="flex-shrink-0">
-                        <span className={`text-xs font-bold px-2 py-1 rounded ${
-                          rec.status === "UNSEEN" ? "bg-blue-500/30 text-blue-200" :
-                          rec.status === "SEEN" ? "bg-slate-500/30 text-slate-300" :
-                          rec.status === "SAVED" ? "bg-emerald-500/30 text-emerald-300" :
-                          rec.status === "APPLIED" ? "bg-cyan-500/30 text-cyan-300" :
-                          "bg-slate-600/30 text-slate-400"
-                        }`}>
-                          {rec.status}
-                        </span>
+                      {/* Action buttons */}
+                      <div className="flex gap-2 mt-3 flex-wrap">
+                        <a
+                          href={g.job.applyUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-semibold px-3 py-1.5 hover:shadow-lg hover:shadow-blue-500/30 transition"
+                        >
+                          Open →
+                        </a>
+                        {status === "UNSEEN" && (
+                          <button onClick={() => updateJobRecStatus(g.jobId, "SEEN")}
+                            className="rounded-lg bg-slate-700/50 border border-slate-600 text-white text-xs px-3 py-1.5 hover:bg-slate-700 transition">
+                            Mark Seen
+                          </button>
+                        )}
+                        {status !== "SAVED" && status !== "APPLIED" && (
+                          <button onClick={() => updateJobRecStatus(g.jobId, "SAVED")}
+                            className="rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs px-3 py-1.5 hover:bg-emerald-500/30 transition">
+                            Save
+                          </button>
+                        )}
+                        {status !== "APPLIED" && (
+                          <button onClick={() => updateJobRecStatus(g.jobId, "APPLIED")}
+                            className="rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs px-3 py-1.5 hover:bg-cyan-500/30 transition">
+                            Applied ✓
+                          </button>
+                        )}
+                        {status !== "SKIPPED" && (
+                          <button onClick={() => updateJobRecStatus(g.jobId, "SKIPPED")}
+                            className="rounded-lg bg-slate-700/30 border border-slate-600/50 text-slate-400 text-xs px-3 py-1.5 hover:bg-slate-700/50 transition">
+                            Skip
+                          </button>
+                        )}
+                        <button onClick={() => openTimeline(g.job.id)}
+                          className="rounded-lg bg-violet-500/20 border border-violet-500/40 text-violet-300 text-xs px-3 py-1.5 hover:bg-violet-500/30 transition">
+                          🕐 Timeline
+                        </button>
                       </div>
                     </div>
-
-                    {/* Action buttons */}
-                    <div className="flex gap-2 mt-3 flex-wrap">
-                      <a
-                        href={rec.job.applyUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 text-white text-xs font-semibold px-3 py-1.5 hover:shadow-lg hover:shadow-blue-500/30 transition"
-                      >
-                        Open →
-                      </a>
-                      {rec.status === "UNSEEN" && (
-                        <button
-                          onClick={() => updateRecStatus(rec.id, "SEEN")}
-                          className="rounded-lg bg-slate-700/50 border border-slate-600 text-white text-xs px-3 py-1.5 hover:bg-slate-700 transition"
-                        >
-                          Mark Seen
-                        </button>
-                      )}
-                      {rec.status !== "SAVED" && rec.status !== "APPLIED" && (
-                        <button
-                          onClick={() => updateRecStatus(rec.id, "SAVED")}
-                          className="rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs px-3 py-1.5 hover:bg-emerald-500/30 transition"
-                        >
-                          Save
-                        </button>
-                      )}
-                      {rec.status !== "APPLIED" && (
-                        <button
-                          onClick={() => updateRecStatus(rec.id, "APPLIED")}
-                          className="rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs px-3 py-1.5 hover:bg-cyan-500/30 transition"
-                        >
-                          Applied
-                        </button>
-                      )}
-                      {rec.status !== "SKIPPED" && (
-                        <button
-                          onClick={() => updateRecStatus(rec.id, "SKIPPED")}
-                          className="rounded-lg bg-slate-700/30 border border-slate-600/50 text-slate-400 text-xs px-3 py-1.5 hover:bg-slate-700/50 transition"
-                        >
-                          Skip
-                        </button>
-                      )}
-                      <button
-                        onClick={() => openTimeline(rec.job.id)}
-                        className="rounded-lg bg-violet-500/20 border border-violet-500/40 text-violet-300 text-xs px-3 py-1.5 hover:bg-violet-500/30 transition"
-                      >
-                        🕐 Timeline
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
