@@ -1,0 +1,7 @@
+company,provider,boardToken,url,enabled,priority,tags
+Stripe,GREENHOUSE,stripe,,true,10,"fintech,payments"
+Vercel,GREENHOUSE,vercel,,true,9,"frontend,devtools"
+Cloudflare,GREENHOUSE,cloudflare,,true,8,"infrastructure,networking"
+Linear,ASHBY,linear-app,,true,7,"devtools,productivity"
+Rippling,LEVER,rippling,,true,6,"hr,saas"
+Acme Corp,CUSTOM,,https://jobs.acme.example/api/jobs,true,5,"custom"

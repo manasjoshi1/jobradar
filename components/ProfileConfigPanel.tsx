@@ -658,11 +658,27 @@ function SourcesTab({ config, onRefresh }: { config: ConfigStatus; onRefresh: ()
 
 // ── Import/Export Tab ─────────────────────────────────────────────────────────
 
+type SourceImportResult = {
+  ok: boolean;
+  preview?: boolean;
+  summary?: { created: number; updated: number; skipped: number; invalid: number };
+  rows?: unknown[];
+  errors?: Array<{ row: number; field: string; message: string }>;
+  parseErrors?: string[];
+  error?: string;
+};
+
 function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
-  const [yamlText, setYamlText] = useState("");
+  const [yamlText, setYamlText]     = useState("");
   const [importType, setImportType] = useState<"user" | "companies" | "all">("user");
-  const [importing, setImporting] = useState(false);
+  const [importing, setImporting]   = useState(false);
   const [importResult, setImportResult] = useState<{ ok: boolean; imported?: Record<string, unknown>; errors?: string[] } | null>(null);
+
+  // Source file upload state
+  const [sourceFile, setSourceFile]           = useState<File | null>(null);
+  const [sourcePreviewing, setSourcePreviewing] = useState(false);
+  const [sourceSaving, setSourceSaving]         = useState(false);
+  const [sourceResult, setSourceResult]         = useState<SourceImportResult | null>(null);
 
   async function handleImport() {
     if (!yamlText.trim()) return;
@@ -684,7 +700,7 @@ function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
     }
   }
 
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleYamlFileLoad(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -692,11 +708,119 @@ function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
     reader.readAsText(file);
   }
 
+  async function uploadSourceFile(preview: boolean) {
+    if (!sourceFile) return;
+    if (preview) { setSourcePreviewing(true); } else { setSourceSaving(true); }
+    setSourceResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", sourceFile);
+      const url = preview ? "/api/sources/import?preview=true" : "/api/sources/import";
+      const res = await fetch(url, { method: "POST", body: fd });
+      const data = await res.json() as SourceImportResult;
+      setSourceResult(data);
+      if (!preview && data.ok) onRefresh();
+    } catch (e) {
+      setSourceResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      if (preview) { setSourcePreviewing(false); } else { setSourceSaving(false); }
+    }
+  }
+
   return (
     <div className="space-y-6">
-      {/* Import */}
+      {/* ── Source file upload ─────────────────────────────────────────── */}
       <div className="rounded-xl bg-slate-800/60 border border-blue-500/20 p-5 space-y-4">
-        <h3 className="text-white font-semibold">Import Config</h3>
+        <div>
+          <h3 className="text-white font-semibold">Upload Source List</h3>
+          <p className="text-xs text-blue-300/50 mt-0.5">
+            Upload a YAML or CSV file to bulk-import company job sources.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-xs text-blue-300/60">
+            File (.yml / .yaml / .csv)
+          </label>
+          <input
+            type="file"
+            accept=".yml,.yaml,.csv"
+            onChange={(e) => { setSourceFile(e.target.files?.[0] ?? null); setSourceResult(null); }}
+            className="text-sm text-blue-300/70 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer"
+          />
+          {sourceFile && (
+            <p className="text-xs text-slate-400">{sourceFile.name} · {(sourceFile.size / 1024).toFixed(1)} KB</p>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => uploadSourceFile(true)}
+            disabled={!sourceFile || sourcePreviewing || sourceSaving}
+            className="bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-200 text-sm px-3 py-1.5 rounded-lg transition-colors"
+          >
+            {sourcePreviewing ? "Previewing…" : "Preview"}
+          </button>
+          <button
+            onClick={() => uploadSourceFile(false)}
+            disabled={!sourceFile || sourcePreviewing || sourceSaving}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
+          >
+            {sourceSaving ? "Importing…" : "Import Sources"}
+          </button>
+        </div>
+
+        {sourceResult && (
+          <div
+            role="status"
+            className={`rounded-lg p-3 text-xs space-y-2 ${sourceResult.ok ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-red-500/10 border border-red-500/20"}`}
+          >
+            {sourceResult.error && <p className="text-red-400 font-medium">{sourceResult.error}</p>}
+            {sourceResult.parseErrors?.map((e, i) => <p key={i} className="text-red-300">{e}</p>)}
+
+            {sourceResult.summary && (
+              <div className="grid grid-cols-4 gap-2 text-center">
+                {(["created", "updated", "skipped", "invalid"] as const).map((k) => (
+                  <div key={k} className={`rounded-lg p-2 ${k === "invalid" && (sourceResult.summary?.[k] ?? 0) > 0 ? "bg-red-500/20" : "bg-slate-700/60"}`}>
+                    <p className="text-lg font-bold text-white">{sourceResult.summary?.[k] ?? 0}</p>
+                    <p className="text-blue-300/60 capitalize">{k}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {sourceResult.preview && sourceResult.rows && sourceResult.rows.length > 0 && (
+              <div>
+                <p className="text-emerald-400 font-medium mb-1">Preview — {sourceResult.rows.length} valid rows (not saved yet)</p>
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {(sourceResult.rows as Array<{ company: string; provider: string; url: string | null }>).map((r, i) => (
+                    <p key={i} className="text-slate-300 font-mono">{r.company} · {r.provider} · {r.url ?? "—"}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {sourceResult.errors && sourceResult.errors.length > 0 && (
+              <div>
+                <p className="text-amber-400 font-medium">Row errors:</p>
+                {sourceResult.errors.map((e, i) => (
+                  <p key={i} className="text-amber-300">Row {e.row}: [{e.field}] {e.message}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <p className="text-xs text-slate-600">
+          YAML format: <code className="text-slate-400">sources: [{"{"}company, provider, boardToken, enabled{"}"}]</code>
+          &nbsp;·&nbsp;
+          CSV columns: <code className="text-slate-400">company,provider,boardToken,url,enabled,priority,tags</code>
+        </p>
+      </div>
+
+      {/* ── User config YAML import ────────────────────────────────────── */}
+      <div className="rounded-xl bg-slate-800/60 border border-blue-500/20 p-5 space-y-4">
+        <h3 className="text-white font-semibold">Import Config (YAML)</h3>
 
         <div className="flex items-center gap-3">
           <label className="text-xs text-blue-300/60">Type:</label>
@@ -712,11 +836,11 @@ function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
         </div>
 
         <div>
-          <label className="block text-xs text-blue-300/60 mb-1">Upload YAML file</label>
+          <label className="block text-xs text-blue-300/60 mb-1">Load from file</label>
           <input
             type="file"
             accept=".yml,.yaml"
-            onChange={handleFileUpload}
+            onChange={handleYamlFileLoad}
             className="text-sm text-blue-300/70 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer"
           />
         </div>
@@ -745,10 +869,7 @@ function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
             className={`rounded-lg p-3 text-xs space-y-1 ${importResult.ok ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-red-500/10 border border-red-500/20"}`}
           >
             {importResult.ok && (
-              <p
-                data-testid="profile-config-import-success"
-                className="text-emerald-400 font-medium"
-              >
+              <p data-testid="profile-config-import-success" className="text-emerald-400 font-medium">
                 Import successful
               </p>
             )}
@@ -765,7 +886,7 @@ function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
         )}
       </div>
 
-      {/* Export */}
+      {/* ── Export ────────────────────────────────────────────────────────── */}
       <div className="rounded-xl bg-slate-800/60 border border-blue-500/20 p-5 space-y-4">
         <h3 className="text-white font-semibold">Export Config</h3>
         <div className="flex flex-wrap gap-3">
@@ -788,12 +909,195 @@ function ImportExportTab({ onRefresh }: { onRefresh: () => void }) {
   );
 }
 
+// ── Dangerous Actions Tab ─────────────────────────────────────────────────────
+
+type ResetMode = "prefs" | "onboarding" | "sources" | "jobs" | "workspace";
+
+const RESET_ACTIONS: Array<{
+  mode: ResetMode;
+  label: string;
+  desc: string;
+  color: "amber" | "red";
+  requiresConfirm?: boolean;
+}> = [
+  {
+    mode: "prefs",
+    label: "Reset preferences",
+    desc: "Restores UserJobPreference to defaults. Keeps account, sources, and jobs.",
+    color: "amber",
+  },
+  {
+    mode: "onboarding",
+    label: "Reset onboarding",
+    desc: "Marks onboarding as incomplete. You will be sent back to the setup wizard on next load.",
+    color: "amber",
+  },
+  {
+    mode: "sources",
+    label: "Clear my source configs",
+    desc: "Removes your per-user source selections. Global sources remain; sync will fall back to all enabled sources.",
+    color: "amber",
+  },
+  {
+    mode: "jobs",
+    label: "Clear job state",
+    desc: "Deletes your saved/applied/seen job statuses and all recommendation history. Does not delete global jobs.",
+    color: "red",
+  },
+  {
+    mode: "workspace",
+    label: "Full workspace reset",
+    desc: "Resets preferences, onboarding, source configs, role profiles, and all job state. Type RESET to confirm.",
+    color: "red",
+    requiresConfirm: true,
+  },
+];
+
+function DangerousActionsTab() {
+  const [pending, setPending]   = useState<ResetMode | null>(null);
+  const [confirm, setConfirm]   = useState("");
+  const [result, setResult]     = useState<{ ok: boolean; reset?: string[]; error?: string } | null>(null);
+  const [working, setWorking]   = useState(false);
+
+  function startReset(mode: ResetMode) {
+    setPending(mode);
+    setConfirm("");
+    setResult(null);
+  }
+
+  function cancel() {
+    setPending(null);
+    setConfirm("");
+    setResult(null);
+  }
+
+  async function execReset() {
+    if (!pending) return;
+    setWorking(true);
+    setResult(null);
+    try {
+      const body: Record<string, string> = { mode: pending };
+      if (pending === "workspace") body.confirm = confirm;
+
+      const res = await fetch("/api/profile/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json() as { ok: boolean; reset?: string[]; error?: string };
+      setResult(data);
+      if (data.ok) {
+        setTimeout(() => {
+          if (pending === "onboarding" || pending === "workspace") {
+            window.location.href = "/onboarding";
+          } else {
+            setPending(null);
+          }
+        }, 1200);
+      }
+    } catch (e) {
+      setResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  const action = RESET_ACTIONS.find((a) => a.mode === pending);
+  const canSubmit = pending !== "workspace" || confirm === "RESET";
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-4">
+        <p className="text-red-400 text-sm font-semibold mb-1">⚠ Danger Zone</p>
+        <p className="text-red-300/60 text-xs">
+          These actions are irreversible. Read each description carefully before proceeding.
+        </p>
+      </div>
+
+      {RESET_ACTIONS.map((a) => {
+        const colors = a.color === "red"
+          ? "border-red-500/20 bg-red-500/5 hover:bg-red-500/10"
+          : "border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10";
+        const btnColors = a.color === "red"
+          ? "bg-red-700/60 hover:bg-red-600 text-red-200"
+          : "bg-amber-700/60 hover:bg-amber-600 text-amber-200";
+        return (
+          <div key={a.mode} className={`rounded-xl border p-4 transition-colors ${colors}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-white">{a.label}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{a.desc}</p>
+              </div>
+              <button
+                onClick={() => startReset(a.mode)}
+                className={`shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${btnColors}`}
+              >
+                {a.label.split(" ")[0]}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Confirmation modal */}
+      {pending && action && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div>
+              <p className="text-lg font-bold text-white">{action.label}</p>
+              <p className="text-sm text-slate-400 mt-1">{action.desc}</p>
+            </div>
+
+            {action.requiresConfirm && (
+              <div>
+                <label className="block text-xs text-red-400 mb-1.5">
+                  Type <strong>RESET</strong> to confirm
+                </label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500"
+                  placeholder="RESET"
+                />
+              </div>
+            )}
+
+            {result && (
+              <div className={`rounded-lg px-3 py-2 text-xs ${result.ok ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}>
+                {result.ok ? `Reset complete: ${result.reset?.join(", ")}` : result.error}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={cancel}
+                className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm py-2 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={execReset}
+                disabled={working || !canSubmit}
+                className="flex-1 bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+              >
+                {working ? "Resetting…" : "Confirm reset"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function ProfileConfigPanel() {
   const [config, setConfig] = useState<ConfigStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"preferences" | "roleProfiles" | "sources" | "importExport">("preferences");
+  const [activeTab, setActiveTab] = useState<"preferences" | "roleProfiles" | "sources" | "importExport" | "danger">("preferences");
 
   const [refreshKey, setRefreshKey] = useState(0);
   const fetchConfig = useCallback(() => { setRefreshKey((k) => k + 1); }, []);
@@ -838,6 +1142,7 @@ export function ProfileConfigPanel() {
           onClick={() => setActiveTab("sources")}
         />
         <TabBtn label="Import / Export" active={activeTab === "importExport"} onClick={() => setActiveTab("importExport")} />
+        <TabBtn label="⚠ Reset" active={activeTab === "danger"} onClick={() => setActiveTab("danger")} />
       </div>
 
       {/* Tab content */}
@@ -846,6 +1151,7 @@ export function ProfileConfigPanel() {
         {activeTab === "roleProfiles" && <RoleProfilesTab config={config} onRefresh={fetchConfig} />}
         {activeTab === "sources" && <SourcesTab config={config} onRefresh={fetchConfig} />}
         {activeTab === "importExport" && <ImportExportTab onRefresh={fetchConfig} />}
+        {activeTab === "danger" && <DangerousActionsTab />}
       </div>
     </div>
   );
