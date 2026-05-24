@@ -13,12 +13,14 @@
     "db:studio": "prisma studio",
     "config:import": "tsx scripts/config-import.ts",
     "db:backfill-effective-new-at": "node scripts/backfill-effective-new-at.mjs",
-    "runs:recover": "node scripts/recover-abandoned-runs.mjs"
+    "runs:recover": "node scripts/recover-abandoned-runs.mjs",
+    "deploy:bootstrap": "node scripts/deploy-bootstrap.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
     "next": "16.2.6",
     "node-cron": "4.2.1",
+    "p-limit": "7.3.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "xlsx": "0.18.5",
