@@ -1,5 +1,9 @@
 services:
   jobradar:
+    # 'image' is the registry tag used by CI (docker compose pull).
+    # 'build' is kept so local dev can still run docker compose up --build.
+    # Production deploy: docker compose pull && docker compose up -d
+    image: ghcr.io/manasjoshi1/jobradar:latest
     build: .
     container_name: jobradar
     ports:

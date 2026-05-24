@@ -94,11 +94,15 @@ jobs:
           path: test-results/
           retention-days: 7
 
-  # ── Job 2: Docker build validation ───────────────────────────────────────
+  # ── Job 2: Docker build + publish ────────────────────────────────────────
   docker-build:
-    name: Docker build
+    name: Docker build · publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
+    permissions:
+      contents: read
+      packages: write   # needed to push to ghcr.io
 
     steps:
       - name: Checkout
@@ -107,12 +111,32 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
+      - name: Log in to GitHub Container Registry
+        # Only log in when we will actually push (push to main/master).
+        # PRs skip this step — GITHUB_TOKEN on forks cannot push to the org registry.
+        if: ${{ github.event_name == 'push' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/manasjoshi1/jobradar
+          tags: |
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=sha,prefix=sha-,format=short,enable=${{ github.event_name == 'push' }}
+
+      - name: Build Docker image (and push on main)
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: false
-          tags: jobradar:ci
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ github.event_name == 'push' && steps.meta.outputs.tags || 'jobradar:ci' }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -194,8 +218,11 @@ jobs:
             git fetch origin
             git reset --hard FETCH_HEAD
 
-            echo "==> Building Docker image and restarting container..."
-            docker compose up --build -d
+            echo "==> Pulling latest image from ghcr.io..."
+            docker compose pull
+
+            echo "==> Restarting container from pulled image..."
+            docker compose up -d
 
             echo "==> Waiting for container to become ready..."
             sleep 15
