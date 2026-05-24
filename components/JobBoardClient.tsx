@@ -317,6 +317,11 @@ export function JobBoardClient({
   // Sources tab state
   const [sourceHealth, setSourceHealth] = useState<SourceHealthRow[]>([]);
   const [sourceHealthLoading, setSourceHealthLoading] = useState(false);
+  const [sourceHealthPage, setSourceHealthPage] = useState(1);
+  const [sourceHealthPageSize, setSourceHealthPageSize] = useState(50);
+  const [sourceHealthTotal, setSourceHealthTotal] = useState(0);
+  const [sourceHealthTotalPages, setSourceHealthTotalPages] = useState(1);
+  const [sourceHealthError, setSourceHealthError] = useState<string | null>(null);
 
   // Live sync progress state
   const [liveSyncRunId, setLiveSyncRunId] = useState<string | null>(null);
@@ -486,13 +491,30 @@ export function JobBoardClient({
       .finally(() => setNotifsLoading(false));
   };
 
-  const fetchSourceHealth = () => {
+  const fetchSourceHealth = (page = sourceHealthPage, pageSize = sourceHealthPageSize) => {
     setSourceHealthLoading(true);
-    fetch("/api/sources/health")
-      .then((r) => r.json() as Promise<{ sources: SourceHealthRow[] }>)
-      .then((d) => setSourceHealth(d.sources))
-      .catch(console.error)
-      .finally(() => setSourceHealthLoading(false));
+    setSourceHealthError(null);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 15_000);
+    fetch(`/api/sources/health?page=${page}&pageSize=${pageSize}`, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<{ sources: SourceHealthRow[]; total: number; totalPages: number; page: number }>;
+      })
+      .then((d) => {
+        setSourceHealth(d.sources);
+        setSourceHealthTotal(d.total);
+        setSourceHealthTotalPages(d.totalPages);
+        setSourceHealthPage(d.page);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") {
+          setSourceHealthError("Request timed out. Try again.");
+        } else {
+          setSourceHealthError("Could not load sources.");
+        }
+      })
+      .finally(() => { clearTimeout(timer); setSourceHealthLoading(false); });
   };
 
   const startLiveSync = async () => {
@@ -552,7 +574,7 @@ export function JobBoardClient({
       else if (historySubTab === "recs") fetchRecRuns(1);
       else fetchNotifs(1);
     } else if (mainTab === "sources") {
-      fetchSourceHealth();
+      fetchSourceHealth(1, sourceHealthPageSize);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainTab, historySubTab]);
@@ -1857,57 +1879,119 @@ export function JobBoardClient({
         ════════════════════════════════════════════════════════════════════ */}
         {mainTab === "sources" && (
           <div>
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-white">🏢 Source Health</h2>
-              <button onClick={fetchSourceHealth} className="text-xs text-blue-400 hover:text-blue-200">↺ Refresh</button>
+            {/* Header */}
+            <div className="flex flex-wrap justify-between items-center mb-4 gap-2">
+              <div>
+                <h2 className="text-lg font-bold text-white">🏢 Source Health</h2>
+                {sourceHealthTotal > 0 && (
+                  <p className="text-xs text-slate-400 mt-0.5">{sourceHealthTotal} sources total</p>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <select
+                  value={sourceHealthPageSize}
+                  onChange={(e) => {
+                    const ps = Number(e.target.value);
+                    setSourceHealthPageSize(ps);
+                    fetchSourceHealth(1, ps);
+                  }}
+                  className="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-300"
+                >
+                  {[25, 50, 100, 200].map((n) => (
+                    <option key={n} value={n}>{n} per page</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => fetchSourceHealth(sourceHealthPage, sourceHealthPageSize)}
+                  disabled={sourceHealthLoading}
+                  className="text-xs text-blue-400 hover:text-blue-200 disabled:opacity-40"
+                >
+                  {sourceHealthLoading ? "Loading…" : "↺ Refresh"}
+                </button>
+              </div>
             </div>
-            {sourceHealthLoading ? (
-              <p className="text-blue-300 text-center py-10">Loading…</p>
-            ) : sourceHealth.length === 0 ? (
+
+            {/* Error */}
+            {sourceHealthError && (
+              <div className="rounded-lg bg-red-900/30 border border-red-500/30 text-red-400 text-sm px-4 py-3 mb-4 flex justify-between items-center">
+                {sourceHealthError}
+                <button onClick={() => fetchSourceHealth(sourceHealthPage, sourceHealthPageSize)} className="text-xs underline">Retry</button>
+              </div>
+            )}
+
+            {/* Skeleton */}
+            {sourceHealthLoading && sourceHealth.length === 0 ? (
+              <div className="space-y-2">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <div key={i} className="h-10 rounded bg-slate-700/40 animate-pulse" />
+                ))}
+              </div>
+            ) : !sourceHealthLoading && sourceHealth.length === 0 && !sourceHealthError ? (
               <p className="text-blue-300/60 text-center py-10">No sources found.</p>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-blue-500/20">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-slate-800/80 text-blue-300 text-xs uppercase">
-                    <tr>
-                      <th className="px-4 py-3">Company</th>
-                      <th className="px-4 py-3">Provider</th>
-                      <th className="px-4 py-3">Enabled</th>
-                      <th className="px-4 py-3">Last Sync</th>
-                      <th className="px-4 py-3">Last Status</th>
-                      <th className="px-4 py-3">Active Jobs</th>
-                      <th className="px-4 py-3">Total Jobs</th>
-                      <th className="px-4 py-3">Latest Seen</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/50">
-                    {sourceHealth.map((s) => {
-                      const isOk = s.lastSyncStatus?.startsWith("OK");
-                      const isErr = s.lastSyncStatus?.startsWith("ERROR");
-                      return (
-                        <tr key={s.id} className="bg-slate-800/40 hover:bg-slate-800/70">
-                          <td className="px-4 py-3 font-medium text-white">{s.company}</td>
-                          <td className="px-4 py-3 text-slate-400 text-xs uppercase">{s.provider}</td>
-                          <td className="px-4 py-3">
-                            <span className={`text-xs font-semibold ${s.enabled ? "text-emerald-400" : "text-slate-500"}`}>
-                              {s.enabled ? "✓" : "✗"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-slate-300 text-xs">{s.lastSyncAt ? timeAgo(s.lastSyncAt) : "—"}</td>
-                          <td className="px-4 py-3 text-xs max-w-xs truncate">
-                            <span className={isOk ? "text-emerald-400" : isErr ? "text-red-400" : "text-slate-400"}>
-                              {s.lastSyncStatus?.slice(0, 60) ?? "—"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-white">{s.activeJobCount}</td>
-                          <td className="px-4 py-3 text-slate-400">{s.totalJobCount}</td>
-                          <td className="px-4 py-3 text-slate-400 text-xs">{s.latestJobSeenAt ? timeAgo(s.latestJobSeenAt) : "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <div className="overflow-x-auto rounded-xl border border-blue-500/20">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-800/80 text-blue-300 text-xs uppercase">
+                      <tr>
+                        <th className="px-4 py-3">Company</th>
+                        <th className="px-4 py-3">Provider</th>
+                        <th className="px-4 py-3">Enabled</th>
+                        <th className="px-4 py-3">Last Sync</th>
+                        <th className="px-4 py-3">Last Status</th>
+                        <th className="px-4 py-3">Active Jobs</th>
+                        <th className="px-4 py-3">Total Jobs</th>
+                        <th className="px-4 py-3">Latest Seen</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y divide-slate-700/50 ${sourceHealthLoading ? "opacity-50" : ""}`}>
+                      {sourceHealth.map((s) => {
+                        const isOk  = s.lastSyncStatus?.startsWith("OK");
+                        const isErr = s.lastSyncStatus?.startsWith("ERROR");
+                        return (
+                          <tr key={s.id} className="bg-slate-800/40 hover:bg-slate-800/70">
+                            <td className="px-4 py-3 font-medium text-white">{s.company}</td>
+                            <td className="px-4 py-3 text-slate-400 text-xs uppercase">{s.provider}</td>
+                            <td className="px-4 py-3">
+                              <span className={`text-xs font-semibold ${s.enabled ? "text-emerald-400" : "text-slate-500"}`}>
+                                {s.enabled ? "✓" : "✗"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-300 text-xs">{s.lastSyncAt ? timeAgo(s.lastSyncAt) : "—"}</td>
+                            <td className="px-4 py-3 text-xs max-w-xs truncate">
+                              <span className={isOk ? "text-emerald-400" : isErr ? "text-red-400" : "text-slate-400"}>
+                                {s.lastSyncStatus?.slice(0, 60) ?? "—"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-white font-medium">{s.activeJobCount}</td>
+                            <td className="px-4 py-3 text-slate-400">{s.totalJobCount}</td>
+                            <td className="px-4 py-3 text-slate-400 text-xs">{s.latestJobSeenAt ? timeAgo(s.latestJobSeenAt) : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {sourceHealthTotalPages > 1 && (
+                  <div className="flex justify-center items-center gap-2 mt-4 text-sm">
+                    <button
+                      disabled={sourceHealthPage <= 1 || sourceHealthLoading}
+                      onClick={() => { const p = sourceHealthPage - 1; setSourceHealthPage(p); fetchSourceHealth(p, sourceHealthPageSize); }}
+                      className="px-3 py-1 rounded bg-slate-700 text-white disabled:opacity-40 hover:bg-slate-600"
+                    >←</button>
+                    <span className="text-slate-400 text-xs">
+                      Page {sourceHealthPage} / {sourceHealthTotalPages}
+                    </span>
+                    <button
+                      disabled={sourceHealthPage >= sourceHealthTotalPages || sourceHealthLoading}
+                      onClick={() => { const p = sourceHealthPage + 1; setSourceHealthPage(p); fetchSourceHealth(p, sourceHealthPageSize); }}
+                      className="px-3 py-1 rounded bg-slate-700 text-white disabled:opacity-40 hover:bg-slate-600"
+                    >→</button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
