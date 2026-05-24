@@ -231,7 +231,7 @@ export async function POST(request: NextRequest) {
 
   let parsed: Record<string, unknown>;
   try {
-    parsed = yaml.load(yamlStr) as Record<string, unknown>;
+    parsed = yaml.parse(yamlStr) as Record<string, unknown>;
     if (typeof parsed !== "object" || parsed === null) {
       return NextResponse.json({ error: "YAML must be an object" }, { status: 400 });
     }

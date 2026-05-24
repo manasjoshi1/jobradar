@@ -54,7 +54,7 @@ async function buildUserYaml(userId: string): Promise<string> {
     })),
   };
 
-  return yaml.dump(doc, { lineWidth: 120, quotingType: '"' });
+  return yaml.stringify(doc, { lineWidth: 120 });
 }
 
 async function buildCompaniesYaml(userId: string): Promise<string> {
@@ -77,7 +77,7 @@ async function buildCompaniesYaml(userId: string): Promise<string> {
     })),
   };
 
-  return yaml.dump(doc, { lineWidth: 120, quotingType: '"' });
+  return yaml.stringify(doc, { lineWidth: 120 });
 }
 
 export async function GET(request: NextRequest) {

@@ -785,20 +785,20 @@ export function ProfileConfigPanel() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"preferences" | "roleProfiles" | "sources" | "importExport">("preferences");
 
-  const fetchConfig = useCallback(async () => {
-    try {
-      const res = await fetch("/api/profile/config/status");
-      if (res.ok) {
-        setConfig(await res.json() as ConfigStatus);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const fetchConfig = useCallback(() => { setRefreshKey((k) => k + 1); }, []);
 
-  useEffect(() => { void fetchConfig(); }, [fetchConfig]);
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    fetch("/api/profile/config/status")
+      .then((res) => res.ok ? res.json() as Promise<ConfigStatus> : Promise.reject(res.status))
+      .then((data) => { if (!cancelled) setConfig(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [refreshKey]);
 
   if (loading) {
     return (
