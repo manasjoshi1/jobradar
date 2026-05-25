@@ -95,6 +95,11 @@ test("YAML import via UI successfully imports user preferences", async ({ page }
   // Navigate to Import/Export sub-tab
   await page.getByRole("button", { name: "Import / Export" }).click();
 
+  // Wait for the YAML textarea to be ready before filling
+  // (ImportExportTab renders after the tab-switch state update)
+  const yamlTextarea = page.locator("textarea").last();
+  await expect(yamlTextarea).toBeVisible({ timeout: 5_000 });
+
   // Paste a minimal user-preferences YAML
   const testYaml = [
     "preferences:",
@@ -110,8 +115,6 @@ test("YAML import via UI successfully imports user preferences", async ({ page }
     "  preferredCompanies: []",
   ].join("\n");
 
-  // The paste textarea is the YAML input
-  const yamlTextarea = page.locator("textarea").last();
   await yamlTextarea.fill(testYaml);
 
   // Make sure "User Profile" import type is selected (it's the default).

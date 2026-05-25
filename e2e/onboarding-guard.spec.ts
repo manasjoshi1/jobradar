@@ -167,7 +167,7 @@ test("explicit onboarding reset (requiresReboarding=true) redirects to /onboardi
   const password = "JobRadarTest1!";
 
   const regRes = await page.request.post("/api/auth/register", {
-    data: { fullName: "Reset Test User", email, password },
+    data: { fullName: "Reset Test User", email, password, confirmPassword: password },
   });
   expect(regRes.ok()).toBe(true);
   // register sets a session cookie — page.request now has a valid session

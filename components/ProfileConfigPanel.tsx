@@ -622,8 +622,12 @@ function SourcesTab({
     </div>
   );
 
-  // ── Empty state (no user sources, no global fallback) ────────────────────────
-  if (config.sources.total === 0 && sourceMode === "NONE") {
+  // ── Empty state (no usable sources, no global fallback) ─────────────────────
+  // Only sourceMode matters here: "NONE" already means resolveUserSources found
+  // zero enabled UserJobSource rows AND useGlobalDefaultSources=false.
+  // We don't also check config.sources.total === 0 because soft-deleted (disabled)
+  // rows still count in total but don't affect sourceMode.
+  if (sourceMode === "NONE") {
     return (
       <div className="space-y-3">
         {actionMsg && (
