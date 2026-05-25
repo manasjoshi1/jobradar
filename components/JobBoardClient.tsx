@@ -897,10 +897,20 @@ export function JobBoardClient({
               <button
                 className="rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:shadow-purple-500/50 transition disabled:opacity-50"
                 disabled={recRunLoading}
-                onClick={() => runRecommendations(24)}
+                onClick={() => runRecommendations(48)}
+                title="Scan jobs from the last 48 hours"
                 type="button"
               >
                 {recRunLoading ? "🧠 Running..." : "🧠 Run Recs"}
+              </button>
+              <button
+                className="rounded-lg bg-gradient-to-r from-violet-500 to-purple-700 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:shadow-violet-500/50 transition disabled:opacity-50"
+                disabled={recRunLoading}
+                onClick={() => runRecommendations(0)}
+                title="Scan ALL jobs in the database (full backfill — use after importing a new profile)"
+                type="button"
+              >
+                {recRunLoading ? "🧠 Running..." : "🔍 Full Scan"}
               </button>
               <button
                 className="rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:shadow-emerald-500/50 transition disabled:opacity-50"

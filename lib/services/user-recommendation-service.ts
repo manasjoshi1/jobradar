@@ -36,6 +36,7 @@ export async function runUserRecommendations(
   // Resolve user
   const resolvedUserId = userId ?? (await getDefaultUserId());
 
+  // windowHours = 0 → full backfill (scan ALL active jobs, no time filter)
   const windowEnd   = new Date();
   const windowStart = new Date(windowEnd.getTime() - windowHours * 3_600_000);
 
@@ -85,11 +86,11 @@ export async function runUserRecommendations(
     // allowedSourceIds: null = all sources ok (global_defaults); Set = specific sourceIds
     const { allowedSourceIds } = sourceResolution;
 
-    // Load jobs in window
+    // Load jobs in window (windowHours=0 → full backfill, no time filter)
     const jobs = await prisma.job.findMany({
       where: {
-        isActive:      true,
-        effectiveNewAt: { gte: windowStart, lte: windowEnd },
+        isActive: true,
+        ...(windowHours > 0 ? { effectiveNewAt: { gte: windowStart, lte: windowEnd } } : {}),
         ...(allowedSourceIds !== null ? { sourceId: { in: [...allowedSourceIds] } } : {}),
       },
       select: {
