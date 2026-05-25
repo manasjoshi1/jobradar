@@ -124,9 +124,15 @@ test("YAML import via UI successfully imports user preferences", async ({ page }
   // Click Import button (exact match to avoid hitting "Importing…" disabled variant)
   await page.getByRole("button", { name: /^Import$/ }).click();
 
-  // Give the import request time to complete and show success state
+  // Wait for the import result (success or error) to appear
   // The import is async — response could take a few seconds
-  await expect(page.getByTestId("profile-config-import-success")).toBeVisible({ timeout: 15_000 });
+  // Either the success indicator or an error message will appear
+  const resultContainer = page.locator('div[role="status"]');
+  await expect(resultContainer).toBeVisible({ timeout: 15_000 });
+
+  // Verify it's a success, not an error
+  const successIndicator = page.getByTestId("profile-config-import-success");
+  await expect(successIndicator).toBeVisible();
 
   // Verify via API that preferences were actually updated
   const statusRes = await page.request.get("/api/profile/config/status");
