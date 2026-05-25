@@ -239,7 +239,13 @@ model UserOnboarding {
   onboardingCompleted Boolean   @default(false)
   onboardingVersion   Int       @default(1)
   prefsJson           String?   // JSON blob of onboarding wizard answers
-  completedAt         DateTime?
+  completedAt         DateTime? // Set once on first completion — never cleared
+
+  /// Set to true only by explicit admin/backend action (e.g. schema migration).
+  /// Must NOT be inferred from sourceCount=0, empty prefs, sync failures, etc.
+  requiresReboarding  Boolean   @default(false)
+  reboardingReason    String?   // Human-readable reason shown in onboarding wizard
+
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

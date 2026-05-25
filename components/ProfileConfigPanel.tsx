@@ -989,7 +989,9 @@ function DangerousActionsTab() {
       if (data.ok) {
         setTimeout(() => {
           if (pending === "onboarding" || pending === "workspace") {
-            window.location.href = "/onboarding";
+            // The reset API issued a new JWT cookie with onboardingCompleted=false.
+            // A full reload lets the proxy read the new cookie and redirect to /onboarding.
+            window.location.reload();
           } else {
             setPending(null);
           }

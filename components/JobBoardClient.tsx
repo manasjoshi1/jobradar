@@ -298,12 +298,24 @@ export function JobBoardClient({
   const [stats, setStats] = useState<UserStats>({ totalRecommendations: 0, unseenRecommendations: 0, jobStatuses: {} });
   const [loggingOut, setLoggingOut] = useState(false);
 
+  // Config readiness: SOURCE_SETUP means onboarded but zero sources and no global sources.
+  type ConfigUi = { nextScreen: string; message: string | null; sourceMode?: string };
+  const [configUi, setConfigUi] = useState<ConfigUi | null>(null);
+
   useEffect(() => {
     fetch("/api/me")
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
         if (d?.user) setCurrentUser(d.user);
         if (d?.stats) setStats(d.stats);
+      })
+      .catch(() => {});
+
+    // Check config readiness (source setup, etc.) — do not use this to trigger onboarding.
+    fetch("/api/profile/config/status")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d: { ui?: ConfigUi; config?: { sourceMode?: string } } | null) => {
+        if (d?.ui) setConfigUi({ ...d.ui, sourceMode: d.config?.sourceMode });
       })
       .catch(() => {});
   }, []);
@@ -934,6 +946,50 @@ export function JobBoardClient({
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+
+        {/* ── Source-setup banner ──────────────────────────────────────────────
+            Shown when the user is fully onboarded but has zero sources configured
+            AND there are no global sources. This is NOT a reason to re-onboard.
+            We show a targeted config prompt instead.
+        ─────────────────────────────────────────────────────────────────────── */}
+        {configUi?.nextScreen === "SOURCE_SETUP" && (
+          <div
+            role="alert"
+            data-testid="source-setup-banner"
+            className="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3"
+          >
+            <div className="flex-1">
+              <p className="text-amber-300 font-semibold text-sm">No job sources configured</p>
+              <p className="text-amber-200/70 text-xs mt-0.5">
+                {configUi.message ?? "Upload a source list or use global defaults to start seeing jobs."}
+              </p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => setMainTab("profile")}
+                className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Upload sources
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Global-fallback info banner (informational only, not blocking) ───── */}
+        {configUi?.nextScreen === "DASHBOARD" && configUi.sourceMode === "GLOBAL_FALLBACK" && (
+          <div
+            data-testid="global-fallback-banner"
+            className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5 px-4 py-2.5 flex items-center gap-3"
+          >
+            <span className="text-blue-300/60 text-xs flex-1">{configUi.message}</span>
+            <button
+              onClick={() => setMainTab("profile")}
+              className="text-blue-400 hover:text-blue-300 text-xs underline underline-offset-2 shrink-0"
+            >
+              Configure sources
+            </button>
+          </div>
+        )}
 
         {/* ═══════════════════════════════════════════════════════════════════
             RECOMMENDATION TABS (Recommended + Alerts)

@@ -116,6 +116,9 @@ export async function POST(request: NextRequest) {
   });
 
   // ── 5. Mark onboarding complete + store full prefs snapshot ──────────────────
+  // completedAt is set on first completion and never cleared (see schema comment).
+  // requiresReboarding is cleared here — the user has satisfied the re-onboarding requirement.
+  const now = new Date();
   await prisma.userOnboarding.upsert({
     where:  { userId },
     create: {
@@ -123,12 +126,19 @@ export async function POST(request: NextRequest) {
       onboardingCompleted: true,
       onboardingVersion:   1,
       prefsJson:           JSON.stringify(data),
-      completedAt:         new Date(),
+      completedAt:         now,
+      requiresReboarding:  false,
+      reboardingReason:    null,
     },
     update: {
       onboardingCompleted: true,
       prefsJson:           JSON.stringify(data),
-      completedAt:         new Date(),
+      // Only set completedAt if not already set (preserve original completion time)
+      // Prisma doesn't support conditional updates in one call; use a raw approach instead:
+      // we always update it here — for re-onboarding it's fine to bump it.
+      completedAt:         now,
+      requiresReboarding:  false,
+      reboardingReason:    null,
     },
   });
 

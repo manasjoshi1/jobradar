@@ -155,13 +155,17 @@ async function main() {
   console.log(`   ✓ User "${user.name}" (id: ${user.id})`);
 
   // Create UserOnboarding record with onboardingCompleted=true for the E2E test user.
+  // completedAt is set (source of truth) and requiresReboarding=false.
   // This ensures the proxy does NOT redirect the test user to /onboarding.
+  const seedNow = new Date();
   await prisma.userOnboarding.create({
     data: {
       userId:              user.id,
       onboardingCompleted: true,
       onboardingVersion:   1,
-      completedAt:         new Date(),
+      completedAt:         seedNow,
+      requiresReboarding:  false,
+      reboardingReason:    null,
     },
   });
 

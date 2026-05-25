@@ -66,13 +66,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
 
-  // Fetch onboarding state
+  // Fetch onboarding state.
+  // Source of truth: completedAt (ever-set timestamp).
+  // requiresReboarding is the ONE explicit flag that can force re-onboarding.
+  // We never infer re-onboarding from sourceCount=0, missing prefs, sync errors, etc.
   const onboarding = await prisma.userOnboarding.findUnique({
     where: { userId: user.id },
-    select: { onboardingCompleted: true },
+    select: { completedAt: true, requiresReboarding: true },
   });
-  // Existing users without an onboarding record are treated as already complete
-  const onboardingCompleted = onboarding?.onboardingCompleted ?? true;
+  // No onboarding record = legacy user who predates the onboarding system → treat as complete.
+  // completedAt set + requiresReboarding=false → complete.
+  // completedAt null (new user, never finished wizard) → not complete.
+  // requiresReboarding=true (explicit admin/migration flag) → not complete.
+  const onboardingCompleted = onboarding
+    ? (onboarding.completedAt !== null && !onboarding.requiresReboarding)
+    : true;
 
   const token = await signSession({
     sub:                user.id,
