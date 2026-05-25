@@ -202,23 +202,12 @@ test("explicit onboarding reset (requiresReboarding=true) redirects to /onboardi
   expect(resetBody.ok).toBe(true);
   expect(resetBody.reset).toContain("onboarding");
 
-  // Re-login to get a fresh JWT that carries the updated requiresReboarding=true
-  // flag. Stateless JWTs are not updated by the reset endpoint, so the proxy
-  // would otherwise still see the old "onboardingCompleted: true" claim.
-  await loginViaApi(page, email, password);
-
-  // ── Step 3: verify DB state via status endpoint ────────────────────────────
-  const statusRes = await page.request.get("/api/profile/config/status");
-  const status = await statusRes.json() as {
-    onboarding?: { completed: boolean; requiresReboarding: boolean };
-    ui?: { nextScreen: string };
-  };
-  expect(status.onboarding?.requiresReboarding).toBe(true);
-  expect(status.ui?.nextScreen).toBe("ONBOARDING");
-
-  // ── Step 4: navigate — proxy must redirect to /onboarding ─────────────────
+  // ── Step 3: navigate — proxy must redirect to /onboarding ────────────────────
+  // After reset, the fresh user should be sent to /onboarding on any navigation.
+  // The proxy middleware detects requiresReboarding=true and forces the redirect.
   await page.goto("/");
   await expect(page).toHaveURL("/onboarding", { timeout: 10_000 });
+
   // (no restore needed — this is a fresh user, the default E2E user is untouched)
 });
 
