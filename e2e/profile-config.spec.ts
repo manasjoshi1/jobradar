@@ -117,6 +117,10 @@ test("YAML import via UI successfully imports user preferences", async ({ page }
 
   await yamlTextarea.fill(testYaml);
 
+  // Verify the YAML was filled (especially important for flaky tests)
+  const filledValue = await yamlTextarea.inputValue();
+  expect(filledValue).toContain("minScore: 43");
+
   // Make sure "User Profile" import type is selected (it's the default).
   // exact:true is required — "Export User Profile" button also contains the substring.
   await page.getByRole("button", { name: "User Profile", exact: true }).click();
