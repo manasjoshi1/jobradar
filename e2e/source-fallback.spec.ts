@@ -30,6 +30,25 @@
 import { test, expect } from "@playwright/test";
 import { loginViaApi } from "./helpers";
 
+// Run all tests in this file serially to prevent parallel DB writes on the shared
+// E2E user from corrupting state across tests (useGlobalDefaultSources toggling).
+test.describe.serial("source-fallback", () => {
+
+// ── Restore helper ─────────────────────────────────────────────────────────────
+// After every test, put the default E2E user back in a known-good state.
+// This prevents test failures in other spec files (recommendations, profile-config)
+// that rely on useGlobalDefaultSources=true.
+test.afterEach(async ({ page }) => {
+  try {
+    await loginViaApi(page);
+    await page.request.patch("/api/profile/preferences", {
+      data: { useGlobalDefaultSources: true },
+    });
+  } catch {
+    // best-effort — don't fail the test on cleanup errors
+  }
+});
+
 // ── B1: User with UserJobSource rows → USER_SELECTED ─────────────────────────
 
 test("B1: user with UserJobSource rows gets sourceMode USER_SELECTED", async ({ page }) => {
@@ -177,10 +196,11 @@ test("F1: Sources tab shows 'No sources configured' empty state when sourceMode=
   await page.request.post("/api/profile/sources/use-global-defaults", { data: { enabled: false } });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /profile|config/i }).click();
+  await page.getByRole("button", { name: /👤 Profile/i }).click();
 
-  // Click the Sources tab
-  await page.getByRole("button", { name: /sources/i }).first().click();
+  // Wait for Profile panel to load, then click the Sources sub-tab
+  await expect(page.getByRole("button", { name: "Import / Export" })).toBeVisible({ timeout: 12_000 });
+  await page.getByRole("button", { name: /^Sources/ }).click();
 
   await expect(page.getByTestId("sources-empty-state")).toBeVisible({ timeout: 8_000 });
   await expect(page.getByText("No sources configured")).toBeVisible();
@@ -197,7 +217,7 @@ test("F2: 'Upload sources' button in empty state switches to Import/Export tab",
   await page.request.post("/api/profile/sources/use-global-defaults", { data: { enabled: false } });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /profile|config/i }).click();
+  await page.getByRole("button", { name: /👤 Profile/i }).click();
   await page.getByRole("button", { name: /sources/i }).first().click();
 
   await expect(page.getByTestId("sources-empty-state")).toBeVisible({ timeout: 8_000 });
@@ -216,7 +236,7 @@ test("F3: 'Use global defaults' button shows confirmation modal", async ({ page 
   await page.request.post("/api/profile/sources/use-global-defaults", { data: { enabled: false } });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /profile|config/i }).click();
+  await page.getByRole("button", { name: /👤 Profile/i }).click();
   await page.getByRole("button", { name: /sources/i }).first().click();
 
   await expect(page.getByTestId("sources-empty-state")).toBeVisible({ timeout: 8_000 });
@@ -245,7 +265,7 @@ test("F4: confirming global defaults removes empty state and shows badge", async
   await page.request.post("/api/profile/sources/use-global-defaults", { data: { enabled: false } });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /profile|config/i }).click();
+  await page.getByRole("button", { name: /👤 Profile/i }).click();
   await page.getByRole("button", { name: /sources/i }).first().click();
 
   await expect(page.getByTestId("sources-empty-state")).toBeVisible({ timeout: 8_000 });
@@ -274,7 +294,7 @@ test("F5: Disable button on global-defaults badge reverts to empty state", async
   await page.request.post("/api/profile/sources/use-global-defaults", { data: { enabled: true } });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /profile|config/i }).click();
+  await page.getByRole("button", { name: /👤 Profile/i }).click();
   await page.getByRole("button", { name: /sources/i }).first().click();
 
   await expect(page.getByTestId("global-defaults-active-badge")).toBeVisible({ timeout: 8_000 });
@@ -294,12 +314,14 @@ test("F6: dashboard shows source-setup banner when nextScreen=SOURCE_SETUP", asy
   await loginViaApi(page);
 
   // nextScreen=SOURCE_SETUP when onboarded AND sourceMode=none
-  await page.request.post("/api/profile/sources/use-global-defaults", { data: { enabled: false } });
+  await page.request.patch("/api/profile/preferences", {
+    data: { useGlobalDefaultSources: false },
+  });
 
   await page.goto("/");
 
   await expect(page.getByTestId("source-setup-banner")).toBeVisible({ timeout: 10_000 });
-
-  // Restore
-  await page.request.post("/api/profile/sources/use-global-defaults", { data: { enabled: true } });
+  // afterEach restores useGlobalDefaultSources=true
 });
+
+}); // end test.describe.serial

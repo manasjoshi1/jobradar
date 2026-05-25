@@ -17,6 +17,11 @@ const REC_TAB  = "⭐ Recommended";
 
 test.beforeEach(async ({ page }) => {
   await loginViaApi(page);
+  // Ensure global defaults is on — source-fallback tests may have left it false,
+  // and without it there are no sources → recommendation cards don't load.
+  await page.request.patch("/api/profile/preferences", {
+    data: { useGlobalDefaultSources: true },
+  });
   await page.goto("/");
 });
 

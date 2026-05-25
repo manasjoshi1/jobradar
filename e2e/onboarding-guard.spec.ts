@@ -147,47 +147,40 @@ test("preferences reset does not send onboarded user to onboarding", async ({ pa
   expect(status.onboarding?.completed).toBe(true);
   expect(status.onboarding?.requiresReboarding).toBe(false);
 
-  // Restore defaults (already done by "prefs" reset, but make it explicit)
-  await page.request.patch("/api/profile/preferences", { data: { minScore: 40 } });
+  // Restore defaults. Also explicitly re-enable global defaults because the
+  // "prefs" reset sets useGlobalDefaultSources to false (the column default).
+  await page.request.patch("/api/profile/preferences", {
+    data: { minScore: 40, useGlobalDefaultSources: true },
+  });
 });
 
 // ── 6. Explicit requiresReboarding=true → onboarding ─────────────────────────
+//
+// IMPORTANT: This test uses a FRESH isolated user — never the default E2E user.
+// Using the default E2E user would call POST /api/onboarding during restore, which
+// deletes all seeded role profiles + cascade-deletes recommendations, breaking every
+// subsequent recommendations.spec.ts test.
 
 test("explicit onboarding reset (requiresReboarding=true) redirects to /onboarding", async ({ page }) => {
-  await loginViaApi(page);
+  // ── Step 1: create + onboard a fresh user ──────────────────────────────────
+  const email    = `onboard-reset-${Date.now()}@jobradar.test`;
+  const password = "JobRadarTest1!";
 
-  // Reset onboarding — this sets requiresReboarding=true AND refreshes JWT
-  const resetRes = await page.request.post("/api/profile/reset", { data: { mode: "onboarding" } });
-  expect(resetRes.status()).toBe(200);
-  const resetBody = await resetRes.json() as { ok: boolean; reset: string[] };
-  expect(resetBody.ok).toBe(true);
-  expect(resetBody.reset).toContain("onboarding");
+  const regRes = await page.request.post("/api/auth/register", {
+    data: { fullName: "Reset Test User", email, password },
+  });
+  expect(regRes.ok()).toBe(true);
+  // register sets a session cookie — page.request now has a valid session
 
-  // Verify DB state via status endpoint — the new JWT is already in the cookie
-  const statusRes = await page.request.get("/api/profile/config/status");
-  const status = await statusRes.json() as {
-    onboarding?: { completed: boolean; requiresReboarding: boolean };
-    ui?: { nextScreen: string };
-  };
-  expect(status.onboarding?.requiresReboarding).toBe(true);
-  expect(status.ui?.nextScreen).toBe("ONBOARDING");
-
-  // Navigate — proxy should redirect to onboarding (JWT now has onboardingCompleted=false)
-  await page.goto("/");
-  await expect(page).toHaveURL("/onboarding", { timeout: 10_000 });
-
-  // ── Restore: complete onboarding to get user back to a usable state ──────────
-  // We do this by hitting the API directly (simulating wizard completion)
-  // so subsequent tests that share the E2E user are not broken.
-  // NOTE: We POST /api/onboarding while on /onboarding page — the proxy allows it.
+  // Complete onboarding for the fresh user
   const completeRes = await page.request.post("/api/onboarding", {
     data: {
       data: {
-        fullName:         "Default User",
+        fullName:         "Reset Test User",
         selectedTitles:   ["Software Engineer"],
         hiddenTitles:     [],
         customTitles:     [],
-        selectedSkills:   ["java"],
+        selectedSkills:   ["typescript"],
         niceHaveKeywords: [],
         negativeKeywords: [],
         remoteOk:         true,
@@ -200,17 +193,41 @@ test("explicit onboarding reset (requiresReboarding=true) redirects to /onboardi
       },
     },
   });
-  expect(completeRes.status()).toBe(200);
+  expect(completeRes.ok()).toBe(true);
 
-  // Now / should be accessible again
+  // ── Step 2: reset onboarding for the fresh user ────────────────────────────
+  const resetRes = await page.request.post("/api/profile/reset", { data: { mode: "onboarding" } });
+  expect(resetRes.status()).toBe(200);
+  const resetBody = await resetRes.json() as { ok: boolean; reset: string[] };
+  expect(resetBody.ok).toBe(true);
+  expect(resetBody.reset).toContain("onboarding");
+
+  // ── Step 3: verify DB state via status endpoint ────────────────────────────
+  const statusRes = await page.request.get("/api/profile/config/status");
+  const status = await statusRes.json() as {
+    onboarding?: { completed: boolean; requiresReboarding: boolean };
+    ui?: { nextScreen: string };
+  };
+  expect(status.onboarding?.requiresReboarding).toBe(true);
+  expect(status.ui?.nextScreen).toBe("ONBOARDING");
+
+  // ── Step 4: navigate — proxy must redirect to /onboarding ─────────────────
   await page.goto("/");
-  await expect(page).toHaveURL("/", { timeout: 10_000 });
+  await expect(page).toHaveURL("/onboarding", { timeout: 10_000 });
+  // (no restore needed — this is a fresh user, the default E2E user is untouched)
 });
 
 // ── Status endpoint shape ──────────────────────────────────────────────────────
 
 test("GET /api/profile/config/status returns onboarding + config + ui blocks", async ({ page }) => {
   await loginViaApi(page);
+
+  // Ensure the default E2E user is in a clean state.
+  // A previous test (e.g. "prefs reset") may have set useGlobalDefaultSources=false,
+  // which would cause nextScreen=SOURCE_SETUP instead of DASHBOARD.
+  await page.request.patch("/api/profile/preferences", {
+    data: { useGlobalDefaultSources: true },
+  });
 
   const res = await page.request.get("/api/profile/config/status");
   expect(res.status()).toBe(200);

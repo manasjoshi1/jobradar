@@ -12,6 +12,11 @@ import { loginViaApi } from "./helpers";
 
 test.beforeEach(async ({ page }) => {
   await loginViaApi(page);
+  // Ensure global defaults is on so config/status returns DASHBOARD, not SOURCE_SETUP.
+  // Source-fallback tests may disable it and leave it false across parallel test files.
+  await page.request.patch("/api/profile/preferences", {
+    data: { useGlobalDefaultSources: true },
+  });
 });
 
 // ── API smoke ─────────────────────────────────────────────────────────────────
