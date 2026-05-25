@@ -6,6 +6,27 @@ import { useEffect, useState, useCallback } from "react";
 
 type ConfigStatus = {
   user: { id: string; name: string | null; email: string | null; fullName: string | null };
+  onboarding?: {
+    completed: boolean;
+    completedAt: string | null;
+    version: number;
+    requiresReboarding: boolean;
+    reboardingReason: string | null;
+  };
+  config?: {
+    hasPreferences: boolean;
+    hasSources: boolean;
+    sourceCount: number;
+    sourceMode: "USER_SELECTED" | "GLOBAL_FALLBACK" | "NONE";
+    useGlobalDefaultSources: boolean;
+    globalSourceCount: number;
+    canSync: boolean;
+    needsSourceSetup: boolean;
+  };
+  ui?: {
+    nextScreen: "ONBOARDING" | "SOURCE_SETUP" | "DASHBOARD";
+    message: string | null;
+  };
   preferences: {
     configured: boolean;
     targetRoles: string[];
@@ -14,6 +35,7 @@ type ConfigStatus = {
     requiresSponsorship: boolean;
     preferredCompanies: string[];
     blockedCompanies: string[];
+    useGlobalDefaultSources: boolean;
   };
   roleProfiles: {
     total: number;
@@ -464,11 +486,43 @@ function RoleProfilesTab({ config, onRefresh }: { config: ConfigStatus; onRefres
 
 // ── Sources Tab ───────────────────────────────────────────────────────────────
 
-function SourcesTab({ config, onRefresh }: { config: ConfigStatus; onRefresh: () => void }) {
+function SourcesTab({
+  config,
+  onRefresh,
+  onSwitchToImport,
+}: {
+  config: ConfigStatus;
+  onRefresh: () => void;
+  onSwitchToImport: () => void;
+}) {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState({ company: "", provider: "GREENHOUSE", boardToken: "", url: "", enabled: true, priority: 0 });
   const [adding, setAdding] = useState(false);
+  const [showGlobalDefaultsModal, setShowGlobalDefaultsModal] = useState(false);
+  const [togglingGlobalDefaults, setTogglingGlobalDefaults] = useState(false);
+
+  const sourceMode        = config.config?.sourceMode        ?? "NONE";
+  const globalSourceCount = config.config?.globalSourceCount ?? 0;
+
+  async function setGlobalDefaults(enabled: boolean) {
+    setTogglingGlobalDefaults(true);
+    setActionMsg(null);
+    try {
+      const res = await fetch("/api/profile/sources/use-global-defaults", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setShowGlobalDefaultsModal(false);
+      onRefresh();
+    } catch (e) {
+      setActionMsg(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setTogglingGlobalDefaults(false);
+    }
+  }
 
   async function toggleEnabled(s: SourceItem) {
     setActionMsg(null);
@@ -535,12 +589,150 @@ function SourcesTab({ config, onRefresh }: { config: ConfigStatus; onRefresh: ()
     }
   }
 
+  // ── Global defaults confirmation modal ──────────────────────────────────────
+  const globalDefaultsModal = showGlobalDefaultsModal && (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+        <div>
+          <p className="text-lg font-bold text-white">Enable global default sources?</p>
+          <p className="text-sm text-slate-400 mt-1">
+            When enabled, your sync will use all globally configured job sources instead of a custom list.
+          </p>
+        </div>
+        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-300">
+          ⚠ Global defaults may include many companies and portals not specifically tailored to this profile.
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowGlobalDefaultsModal(false)}
+            className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm py-2 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            data-testid="confirm-global-defaults-btn"
+            onClick={() => setGlobalDefaults(true)}
+            disabled={togglingGlobalDefaults}
+            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+          >
+            {togglingGlobalDefaults ? "Enabling…" : "Enable global defaults"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Empty state (no user sources, no global fallback) ────────────────────────
+  if (config.sources.total === 0 && sourceMode === "NONE") {
+    return (
+      <div className="space-y-3">
+        {actionMsg && (
+          <p className={`text-sm px-3 py-2 rounded-lg ${actionMsg.startsWith("Error") ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
+            {actionMsg}
+          </p>
+        )}
+
+        <div
+          data-testid="sources-empty-state"
+          className="rounded-xl border border-dashed border-slate-600/50 bg-slate-800/30 p-10 text-center space-y-4"
+        >
+          <div className="space-y-1">
+            <p className="text-white font-semibold text-base">No sources configured</p>
+            <p className="text-sm text-slate-400">
+              Upload a CSV/YAML file or enable global defaults to start syncing jobs for this profile.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              data-testid="upload-sources-btn"
+              onClick={onSwitchToImport}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+            >
+              Upload sources
+            </button>
+            {globalSourceCount > 0 && (
+              <button
+                data-testid="use-global-defaults-btn"
+                onClick={() => setShowGlobalDefaultsModal(true)}
+                className="bg-slate-700 hover:bg-slate-600 border border-slate-600/40 text-slate-200 text-sm px-5 py-2 rounded-lg transition-colors"
+              >
+                Use global defaults
+              </button>
+            )}
+          </div>
+        </div>
+
+        <button
+          onClick={() => setShowAddForm(true)}
+          className="w-full rounded-xl border border-dashed border-blue-500/30 text-blue-400/70 hover:text-blue-300 hover:border-blue-500/50 py-3 text-sm transition-colors"
+        >
+          + Add Source manually
+        </button>
+
+        {showAddForm && (
+          <div className="rounded-xl bg-slate-800/60 border border-blue-500/20 p-4 space-y-3">
+            <p className="text-sm font-medium text-white">Add Source</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-blue-300/50 mb-1">Company *</label>
+                <input type="text" className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-sm text-white focus:outline-none" value={addForm.company} onChange={(e) => setAddForm((f) => ({ ...f, company: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs text-blue-300/50 mb-1">Provider</label>
+                <select className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-sm text-white focus:outline-none" value={addForm.provider} onChange={(e) => setAddForm((f) => ({ ...f, provider: e.target.value }))}>
+                  {["GREENHOUSE", "LEVER", "ASHBY", "CUSTOM"].map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-blue-300/50 mb-1">Board Token</label>
+                <input type="text" className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-sm text-white focus:outline-none" value={addForm.boardToken} onChange={(e) => setAddForm((f) => ({ ...f, boardToken: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs text-blue-300/50 mb-1">URL</label>
+                <input type="text" className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-sm text-white focus:outline-none" value={addForm.url} onChange={(e) => setAddForm((f) => ({ ...f, url: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={addSource} disabled={adding} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">{adding ? "Adding…" : "Add Source"}</button>
+              <button onClick={() => setShowAddForm(false)} className="bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm px-3 py-1.5 rounded-lg transition-colors">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {globalDefaultsModal}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       {actionMsg && (
         <p className={`text-sm px-3 py-2 rounded-lg ${actionMsg.startsWith("Error") ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
           {actionMsg}
         </p>
+      )}
+
+      {/* Global fallback active badge */}
+      {sourceMode === "GLOBAL_FALLBACK" && (
+        <div
+          data-testid="global-defaults-active-badge"
+          className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-center justify-between gap-3"
+        >
+          <div>
+            <p className="text-sm font-medium text-amber-300">Using global defaults</p>
+            <p className="text-xs text-amber-300/60 mt-0.5">
+              Sync uses all globally enabled sources. Add your own sources above to customise.
+            </p>
+          </div>
+          <button
+            data-testid="disable-global-defaults-btn"
+            onClick={() => setGlobalDefaults(false)}
+            disabled={togglingGlobalDefaults}
+            className="shrink-0 text-xs text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {togglingGlobalDefaults ? "Disabling…" : "Disable"}
+          </button>
+        </div>
       )}
 
       {config.sources.items.map((s) => (
@@ -652,6 +844,8 @@ function SourcesTab({ config, onRefresh }: { config: ConfigStatus; onRefresh: ()
           + Add Source
         </button>
       )}
+
+      {globalDefaultsModal}
     </div>
   );
 }
@@ -1151,7 +1345,7 @@ export function ProfileConfigPanel() {
       <div>
         {activeTab === "preferences" && <PreferencesTab config={config} onRefresh={fetchConfig} />}
         {activeTab === "roleProfiles" && <RoleProfilesTab config={config} onRefresh={fetchConfig} />}
-        {activeTab === "sources" && <SourcesTab config={config} onRefresh={fetchConfig} />}
+        {activeTab === "sources" && <SourcesTab config={config} onRefresh={fetchConfig} onSwitchToImport={() => setActiveTab("importExport")} />}
         {activeTab === "importExport" && <ImportExportTab onRefresh={fetchConfig} />}
         {activeTab === "danger" && <DangerousActionsTab />}
       </div>

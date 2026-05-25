@@ -20,6 +20,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/get-user-id";
+import { resolveUserSources } from "@/lib/services/source-resolution";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [user, prefs, profiles, userSources, onboardingRow, globalSourceCount] =
+  const [user, prefs, profiles, userSources, onboardingRow, sourceResolution] =
     await Promise.all([
       prisma.user.findUnique({
         where:  { id: userId },
@@ -59,7 +60,7 @@ export async function GET() {
           reboardingReason:   true,
         },
       }),
-      prisma.jobSource.count({ where: { enabled: true } }),
+      resolveUserSources(userId),
     ]);
 
   // ── Onboarding state ────────────────────────────────────────────────────────
@@ -76,27 +77,28 @@ export async function GET() {
     reboardingReason: onboardingRow?.reboardingReason ?? null,
   };
 
-  // ── Config readiness ────────────────────────────────────────────────────────
+  // ── Config readiness (via centralized resolver) ──────────────────────────────
   const sourceCount = userSources.length;
 
-  let sourceMode: "USER_SELECTED" | "GLOBAL_FALLBACK" | "NONE";
-  if (sourceCount > 0) {
-    sourceMode = "USER_SELECTED";
-  } else if (globalSourceCount > 0) {
-    sourceMode = "GLOBAL_FALLBACK";
-  } else {
-    sourceMode = "NONE";
-  }
+  // Map source-resolution mode to the legacy UI names for backward compat
+  const sourceModeMap: Record<string, "USER_SELECTED" | "GLOBAL_FALLBACK" | "NONE"> = {
+    profile:         "USER_SELECTED",
+    global_defaults: "GLOBAL_FALLBACK",
+    none:            "NONE",
+  };
+  const sourceMode = sourceModeMap[sourceResolution.mode] ?? "NONE";
 
-  // needsSourceSetup: only when fully onboarded AND no user sources AND no global sources.
-  // GLOBAL_FALLBACK is fine — user gets jobs from global sources without any config.
-  const needsSourceSetup = completed && !requiresReboarding && sourceMode === "NONE";
+  // needsSourceSetup: onboarded AND source mode is "none" (no sources, not opted in)
+  const needsSourceSetup = completed && !requiresReboarding && sourceResolution.mode === "none";
 
   const config = {
-    hasPreferences: prefs !== null,
-    hasSources:     sourceCount > 0,
+    hasPreferences:          prefs !== null,
+    hasSources:              sourceCount > 0,
     sourceCount,
     sourceMode,
+    useGlobalDefaultSources: sourceResolution.useGlobalDefaultSources,
+    globalSourceCount:       sourceResolution.globalSourceCount,
+    canSync:                 sourceResolution.canSync,
     needsSourceSetup,
   };
 
@@ -115,7 +117,7 @@ export async function GET() {
   } else {
     nextScreen = "DASHBOARD";
     if (sourceMode === "GLOBAL_FALLBACK") {
-      message = "Using global job sources. Add your own sources in Profile → Sources to customise.";
+      message = "Using global job sources (opt-in). Add your own sources in Profile → Sources to customise.";
     }
   }
 
@@ -124,22 +126,24 @@ export async function GET() {
   // ── Preferences ─────────────────────────────────────────────────────────────
   const preferences = prefs
     ? {
-        configured:          true,
-        targetRoles:         safeJson(prefs.targetRoles),
-        targetLocations:     safeJson(prefs.targetLocations),
-        minScore:            prefs.minScore,
-        requiresSponsorship: prefs.requiresSponsorship,
-        preferredCompanies:  safeJson(prefs.preferredCompanies),
-        blockedCompanies:    safeJson(prefs.blockedCompanies),
+        configured:              true,
+        targetRoles:             safeJson(prefs.targetRoles),
+        targetLocations:         safeJson(prefs.targetLocations),
+        minScore:                prefs.minScore,
+        requiresSponsorship:     prefs.requiresSponsorship,
+        preferredCompanies:      safeJson(prefs.preferredCompanies),
+        blockedCompanies:        safeJson(prefs.blockedCompanies),
+        useGlobalDefaultSources: prefs.useGlobalDefaultSources,
       }
     : {
-        configured:          false,
-        targetRoles:         [],
-        targetLocations:     [],
-        minScore:            45,
-        requiresSponsorship: false,
-        preferredCompanies:  [],
-        blockedCompanies:    [],
+        configured:              false,
+        targetRoles:             [],
+        targetLocations:         [],
+        minScore:                45,
+        requiresSponsorship:     false,
+        preferredCompanies:      [],
+        blockedCompanies:        [],
+        useGlobalDefaultSources: false,
       };
 
   return NextResponse.json({

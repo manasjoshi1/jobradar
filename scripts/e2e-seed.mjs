@@ -170,15 +170,19 @@ async function main() {
   });
 
   // ── 4. Create UserJobPreference ──────────────────────────────────────────
+  // useGlobalDefaultSources=true because the E2E seed creates no UserJobSource rows.
+  // Without this, source resolution would return "none" and recommendations would
+  // return NO_SOURCES_CONFIGURED instead of using the 3 seeded global JobSources.
   await prisma.userJobPreference.create({
     data: {
-      userId:             user.id,
-      targetLocations:    j(["remote", "united states", "new york", "san francisco", "chicago", "hybrid"]),
-      targetRoles:        j(["backend engineer", "software engineer", "java developer", "platform engineer", "full stack engineer", "payments engineer"]),
-      blockedCompanies:   j([]),
-      preferredCompanies: j(["Stripe", "Datadog"]),
-      minScore:           40,
-      requiresSponsorship: false,
+      userId:                  user.id,
+      targetLocations:         j(["remote", "united states", "new york", "san francisco", "chicago", "hybrid"]),
+      targetRoles:             j(["backend engineer", "software engineer", "java developer", "platform engineer", "full stack engineer", "payments engineer"]),
+      blockedCompanies:        j([]),
+      preferredCompanies:      j(["Stripe", "Datadog"]),
+      minScore:                40,
+      requiresSponsorship:     false,
+      useGlobalDefaultSources: true,
     },
   });
 

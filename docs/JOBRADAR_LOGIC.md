@@ -10,11 +10,11 @@ Runs on a schedule (hourly cron) or on demand via `POST /api/sync/start`.
 
 ```mermaid
 flowchart TD
-    A([Cron / API trigger]) --> B[Load enabled sources]
-    B --> C{UserJobSource rows\nexist for user?}
-    C -- Yes --> D[Filter to user's sources]
-    C -- No  --> E[Use all enabled\nglobal sources]
-    D & E --> F[Fetch jobs from\nprovider API]
+    A([Cron / API trigger]) --> SR[resolveGlobalSyncSources]
+    SR --> C{Global source\nmode?}
+    C -- none  --> SK[Create SKIPPED SyncRun\nreason: NO_SOURCES_CONFIGURED]
+    SK --> P([Done])
+    C -- has sources --> F[Fetch jobs from\nprovider API for each source]
     F --> G{HTTP OK?}
     G -- No  --> H[Log error in\nSyncSourceRun]
     G -- Yes --> I[Parse response\nper provider]
@@ -24,12 +24,12 @@ flowchart TD
     K -- Yes --> M[UPDATE lastSeenAt\nmark isActive = true]
     L & M --> N[Mark stale jobs\ninactive]
     N --> O[Write SyncSourceRun\nOK + counts]
-    O --> P([Done])
+    O --> P
 ```
 
-**Key tables:** `JobSource`, `UserJobSource`, `Job`, `SyncRun`, `SyncSourceRun`
+**Key tables:** `JobSource`, `Job`, `SyncRun`, `SyncSourceRun`
 
-**Fallback rule:** If a user has zero `UserJobSource` rows, sync and recommendations fall back to all globally-enabled `JobSource` rows. This preserves backward compatibility for single-user / default-user setups.
+**Source resolution for sync:** `resolveGlobalSyncSources()` in `lib/services/source-resolution.ts`. Returns all globally-enabled `JobSource` rows, or `mode: "none"` if none exist. Sync is always global (system-wide) — there is no per-user source filtering at sync time.
 
 ---
 
@@ -93,29 +93,46 @@ flowchart TD
 
 ---
 
-## 4. User Preference Resolution
+## 4. Source Resolution & User Preference Layers
 
-Shows how per-user config layers over global config.
+`lib/services/source-resolution.ts` is the single source of truth for which sources a user may see recommendations from.
+
+```mermaid
+flowchart TD
+    A([resolveUserSources userId]) --> B{UserJobSource\nrows exist?}
+    B -- Yes --> PM[mode: profile\nallowedSourceIds = user's IDs]
+    B -- No  --> C{UserJobPreference\nuseGlobalDefaultSources = true?}
+    C -- Yes --> GD[mode: global_defaults\nallowedSourceIds = null\nuses all enabled JobSource rows]
+    C -- No  --> NO[mode: none\nNO_SOURCES_CONFIGURED\ncanSync = false]
+```
+
+**Source modes:**
+
+| Mode | Trigger | Recommendations use |
+|---|---|---|
+| `profile` | User has ≥1 `UserJobSource` row | Only jobs from those sources |
+| `global_defaults` | No user sources; `useGlobalDefaultSources = true` | All globally-enabled `JobSource` rows |
+| `none` | No user sources; `useGlobalDefaultSources = false` | None — `NO_SOURCES_CONFIGURED` |
+
+**Per-user config layers:**
 
 ```mermaid
 flowchart LR
     subgraph Global
         GS[JobSource\nglobal enabled list]
         GJ[Job\nglobal job store]
-        GRP[RoleProfile\nglobal presets]
     end
 
     subgraph User layer
-        UJS[UserJobSource\nper-user source enable/priority]
+        UJS[UserJobSource\nper-user source list]
         URP[UserRoleProfile\nper-user role profiles]
-        UJP[UserJobPreference\nminScore · sponsorship · blocked]
+        UJP[UserJobPreference\nminScore · sponsorship · blocked\nuseGlobalDefaultSources]
         UJS_STATUS[UserJobStatus\nsaved · applied · hidden]
     end
 
-    GS -->|fallback if no UJS rows| SYNC[Sync pipeline]
-    UJS -->|user's sources| SYNC
-    SYNC --> GJ
-    GJ -->|unfiltered jobs| REC[Recommendation engine]
+    GS -->|global_defaults mode| REC
+    UJS -->|profile mode| REC[Recommendation engine]
+    GJ -->|job pool| REC
     URP -->|title + keyword matching| REC
     UJP -->|score threshold + sponsorship + blocked| REC
     REC --> UJR[UserJobRecommendation]

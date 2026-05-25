@@ -18,6 +18,7 @@ function formatPrefs(prefs: {
   targetLocations: string | null; targetRoles: string | null;
   blockedCompanies: string | null; preferredCompanies: string | null;
   minScore: number; requiresSponsorship: boolean;
+  useGlobalDefaultSources: boolean;
 }) {
   return {
     id: prefs.id,
@@ -28,6 +29,7 @@ function formatPrefs(prefs: {
     preferredCompanies: safeJson(prefs.preferredCompanies),
     minScore: prefs.minScore,
     requiresSponsorship: prefs.requiresSponsorship,
+    useGlobalDefaultSources: prefs.useGlobalDefaultSources,
   };
 }
 
@@ -102,10 +104,18 @@ export async function PATCH(request: NextRequest) {
     data.requiresSponsorship = body.requiresSponsorship;
   }
 
+  const extData = data as typeof data & { useGlobalDefaultSources?: boolean };
+  if ("useGlobalDefaultSources" in body) {
+    if (typeof body.useGlobalDefaultSources !== "boolean") {
+      return NextResponse.json({ error: "useGlobalDefaultSources must be boolean" }, { status: 400 });
+    }
+    extData.useGlobalDefaultSources = body.useGlobalDefaultSources as boolean;
+  }
+
   const updated = await prisma.userJobPreference.upsert({
     where: { userId },
-    create: { userId, minScore: 45, ...data },
-    update: data,
+    create: { userId, minScore: 45, ...extData },
+    update: extData,
   });
 
   return NextResponse.json(formatPrefs(updated));

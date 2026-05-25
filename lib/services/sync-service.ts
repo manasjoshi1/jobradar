@@ -16,6 +16,7 @@ import pLimit from "p-limit";
 import { prisma } from "@/lib/prisma";
 import { fetchJobsFromSource } from "@/lib/providers";
 import { detectSponsorship } from "@/lib/sponsorship";
+import { resolveGlobalSyncSources } from "@/lib/services/source-resolution";
 import type { JobSource } from "@prisma/client";
 import type { NormalizedJob } from "@/lib/types";
 
@@ -60,6 +61,9 @@ export type SyncResult = {
   jobsMarkedStale: number;
   durationMs: number;
   errors: SyncError[];
+  /** Set when sync was skipped due to no sources being configured. */
+  noSources?: boolean;
+  reason?: "NO_SOURCES_CONFIGURED";
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -273,28 +277,42 @@ async function syncSource(
 export async function runSync(existingSyncRunId?: string): Promise<SyncResult> {
   const startMs = Date.now();
 
-  // Check if any user has UserJobSource preferences
-  const userSourceCount = await prisma.userJobSource.count();
-  let sources: JobSource[];
-  if (userSourceCount > 0) {
-    // At least one user has source preferences — sync only user-selected enabled sources
-    const userSourceIds = await prisma.userJobSource.findMany({
-      where: { enabled: true },
-      select: { sourceId: true },
-      distinct: ["sourceId"],
-    });
-    const sourceIdSet = new Set(userSourceIds.map((u) => u.sourceId));
-    sources = await prisma.jobSource.findMany({
-      where: { enabled: true, id: { in: [...sourceIdSet] } },
-      orderBy: [{ provider: "asc" }, { company: "asc" }],
-    });
-  } else {
-    // Fallback: sync all enabled global sources
-    sources = await prisma.jobSource.findMany({
-      where: { enabled: true },
-      orderBy: [{ provider: "asc" }, { company: "asc" }],
-    });
+  // ── Resolve which sources to sync (centralized, no silent fallback) ──────────
+  const resolution = await resolveGlobalSyncSources();
+
+  if (resolution.mode === "none") {
+    // No sources are configured and no user has opted into global defaults.
+    // Create (or update) a SKIPPED run so there is an audit trail.
+    const skipRunId = existingSyncRunId
+      ? (await prisma.syncRun.update({
+          where: { id: existingSyncRunId },
+          data:  { status: "SKIPPED", finishedAt: new Date(), sourcesProcessed: 0,
+                   errorSummary: "NO_SOURCES_CONFIGURED: no sources available for sync." },
+        })).id
+      : (await prisma.syncRun.create({
+          data: { status: "SKIPPED", sourcesProcessed: 0,
+                  finishedAt: new Date(),
+                  errorSummary: "NO_SOURCES_CONFIGURED: no sources available for sync." },
+        })).id;
+
+    console.log("[sync-service] Skipping sync — NO_SOURCES_CONFIGURED:", resolution.message);
+
+    return {
+      syncRunId:        skipRunId,
+      sourcesProcessed: 0,
+      sourcesSucceeded: 0,
+      sourcesFailed:    0,
+      jobsCreated:      0,
+      jobsUpdated:      0,
+      jobsMarkedStale:  0,
+      durationMs:       Date.now() - startMs,
+      errors:           [],
+      noSources:        true,
+      reason:           "NO_SOURCES_CONFIGURED",
+    };
   }
+
+  const sources: JobSource[] = resolution.sources;
 
   const syncRunId =
     existingSyncRunId ??

@@ -310,6 +310,11 @@ model UserJobPreference {
   minScore            Int     @default(45)
   requiresSponsorship Boolean @default(false)
 
+  /// When true, sync and recommendations use globally enabled sources
+  /// when this user has zero UserJobSource rows.
+  /// Default false — global sources are an explicit opt-in, not a silent fallback.
+  useGlobalDefaultSources Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

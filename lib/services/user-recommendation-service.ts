@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { scoreJob } from "@/lib/recommendation/scoring";
+import { resolveUserSources } from "@/lib/services/source-resolution";
 
 export type UserRecommendationRunResult = {
   status: "SUCCESS" | "PARTIAL_FAILURE" | "FAILED";
@@ -54,23 +55,42 @@ export async function runUserRecommendations(
   let errorSummary: string | undefined;
 
   try {
-    // If user has UserJobSource rows, filter jobs to only those sources
-    const userSourceRows = await prisma.userJobSource.findMany({
-      where: { userId: resolvedUserId, enabled: true },
-      select: { sourceId: true },
-    });
-    // If user has source preferences, only score jobs from those sources
-    // If no UserJobSource rows, score all jobs (backward compat)
-    const allowedSourceIds = userSourceRows.length > 0
-      ? new Set(userSourceRows.map(r => r.sourceId))
-      : null;
+    // Resolve source filter via the centralized resolver — no silent global fallback
+    const sourceResolution = await resolveUserSources(resolvedUserId);
+
+    if (sourceResolution.mode === "none") {
+      // User has no sources configured and has not opted into global defaults.
+      // Do NOT score jobs from global sources — return a clean NO_SOURCES result.
+      await prisma.userRecommendationRun.update({
+        where: { id: run.id },
+        data:  {
+          finishedAt:   new Date(),
+          status:       "SUCCESS",
+          jobsScanned:  0,
+          errorSummary: "NO_SOURCES_CONFIGURED",
+        },
+      });
+      return {
+        status:                 "SUCCESS",
+        userId:                 resolvedUserId,
+        windowHours,
+        jobsScanned:            0,
+        recommendationsCreated: 0,
+        recommendationsUpdated: 0,
+        errorSummary:           "NO_SOURCES_CONFIGURED",
+        runId:                  run.id,
+      };
+    }
+
+    // allowedSourceIds: null = all sources ok (global_defaults); Set = specific sourceIds
+    const { allowedSourceIds } = sourceResolution;
 
     // Load jobs in window
     const jobs = await prisma.job.findMany({
       where: {
         isActive:      true,
         effectiveNewAt: { gte: windowStart, lte: windowEnd },
-        ...(allowedSourceIds ? { sourceId: { in: [...allowedSourceIds] } } : {}),
+        ...(allowedSourceIds !== null ? { sourceId: { in: [...allowedSourceIds] } } : {}),
       },
       select: {
         id: true, title: true, company: true, location: true,
