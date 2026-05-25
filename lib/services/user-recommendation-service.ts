@@ -2,6 +2,13 @@ import { prisma } from "@/lib/prisma";
 import { scoreJob } from "@/lib/recommendation/scoring";
 import { resolveUserSources } from "@/lib/services/source-resolution";
 
+/**
+ * Jobs whose actual posting date is older than this are excluded from
+ * recommendations regardless of when our system first indexed them.
+ * Keeps results fresh — postings this old are almost always already filled.
+ */
+const MAX_JOB_AGE_DAYS = 30;
+
 export type UserRecommendationRunResult = {
   status: "SUCCESS" | "PARTIAL_FAILURE" | "FAILED";
   userId: string;
@@ -86,11 +93,20 @@ export async function runUserRecommendations(
     // allowedSourceIds: null = all sources ok (global_defaults); Set = specific sourceIds
     const { allowedSourceIds } = sourceResolution;
 
-    // Load jobs in window (windowHours=0 → full backfill, no time filter)
+    // Stale-posting cutoff: exclude jobs whose actual posting date is known and
+    // older than MAX_JOB_AGE_DAYS.  Jobs with null postedAt are kept (unknown date).
+    const stalePostedAtCutoff = new Date(Date.now() - MAX_JOB_AGE_DAYS * 86_400_000);
+
+    // Load jobs in window (windowHours=0 → full backfill, no effectiveNewAt filter)
     const jobs = await prisma.job.findMany({
       where: {
         isActive: true,
         ...(windowHours > 0 ? { effectiveNewAt: { gte: windowStart, lte: windowEnd } } : {}),
+        // Always apply postedAt staleness guard regardless of window mode
+        OR: [
+          { postedAt: null },
+          { postedAt: { gte: stalePostedAtCutoff } },
+        ],
         ...(allowedSourceIds !== null ? { sourceId: { in: [...allowedSourceIds] } } : {}),
       },
       select: {
