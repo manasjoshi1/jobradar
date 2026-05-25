@@ -202,6 +202,11 @@ test("explicit onboarding reset (requiresReboarding=true) redirects to /onboardi
   expect(resetBody.ok).toBe(true);
   expect(resetBody.reset).toContain("onboarding");
 
+  // Re-login to get a fresh JWT that carries the updated requiresReboarding=true
+  // flag. Stateless JWTs are not updated by the reset endpoint, so the proxy
+  // would otherwise still see the old "onboardingCompleted: true" claim.
+  await loginViaApi(page, email, password);
+
   // ── Step 3: verify DB state via status endpoint ────────────────────────────
   const statusRes = await page.request.get("/api/profile/config/status");
   const status = await statusRes.json() as {

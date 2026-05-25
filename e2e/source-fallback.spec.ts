@@ -218,7 +218,8 @@ test("F2: 'Upload sources' button in empty state switches to Import/Export tab",
 
   await page.goto("/");
   await page.getByRole("button", { name: /👤 Profile/i }).click();
-  await page.getByRole("button", { name: /sources/i }).first().click();
+  await expect(page.getByRole("button", { name: "Import / Export" })).toBeVisible({ timeout: 12_000 });
+  await page.getByRole("button", { name: /^Sources/ }).click();
 
   await expect(page.getByTestId("sources-empty-state")).toBeVisible({ timeout: 8_000 });
   await page.getByTestId("upload-sources-btn").click();
@@ -237,7 +238,8 @@ test("F3: 'Use global defaults' button shows confirmation modal", async ({ page 
 
   await page.goto("/");
   await page.getByRole("button", { name: /👤 Profile/i }).click();
-  await page.getByRole("button", { name: /sources/i }).first().click();
+  await expect(page.getByRole("button", { name: "Import / Export" })).toBeVisible({ timeout: 12_000 });
+  await page.getByRole("button", { name: /^Sources/ }).click();
 
   await expect(page.getByTestId("sources-empty-state")).toBeVisible({ timeout: 8_000 });
 
@@ -266,7 +268,8 @@ test("F4: confirming global defaults removes empty state and shows badge", async
 
   await page.goto("/");
   await page.getByRole("button", { name: /👤 Profile/i }).click();
-  await page.getByRole("button", { name: /sources/i }).first().click();
+  await expect(page.getByRole("button", { name: "Import / Export" })).toBeVisible({ timeout: 12_000 });
+  await page.getByRole("button", { name: /^Sources/ }).click();
 
   await expect(page.getByTestId("sources-empty-state")).toBeVisible({ timeout: 8_000 });
 
@@ -295,7 +298,8 @@ test("F5: Disable button on global-defaults badge reverts to empty state", async
 
   await page.goto("/");
   await page.getByRole("button", { name: /👤 Profile/i }).click();
-  await page.getByRole("button", { name: /sources/i }).first().click();
+  await expect(page.getByRole("button", { name: "Import / Export" })).toBeVisible({ timeout: 12_000 });
+  await page.getByRole("button", { name: /^Sources/ }).click();
 
   await expect(page.getByTestId("global-defaults-active-badge")).toBeVisible({ timeout: 8_000 });
   await page.getByTestId("disable-global-defaults-btn").click();
