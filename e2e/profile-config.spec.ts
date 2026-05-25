@@ -132,11 +132,18 @@ test("YAML import via UI successfully imports user preferences", async ({ page }
 
   // Wait for the import result (success or error) to appear
   // The import is async — response could take a few seconds
-  // Either the success indicator or an error message will appear
   const resultContainer = page.locator('div[role="status"]');
   await expect(resultContainer).toBeVisible({ timeout: 15_000 });
 
-  // The endpoint always returns ok:true, so verify the success message appears
+  // If the API returns an error, show it in the test output for debugging
+  const errorMessages = page.locator('div[role="status"]').locator('p').filter({ hasText: /error|Error/i });
+  const hasError = await errorMessages.count() > 0;
+  if (hasError) {
+    const errorText = await errorMessages.first().textContent();
+    throw new Error(`YAML import failed: ${errorText}`);
+  }
+
+  // Verify the success indicator appears
   const successIndicator = page.getByTestId("profile-config-import-success");
   await expect(successIndicator).toBeVisible({ timeout: 3_000 });
 
