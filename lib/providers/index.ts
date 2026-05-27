@@ -4,6 +4,7 @@ import { fetchJobsFromAshby } from "./ashby";
 import { fetchJobsFromCustom } from "./custom";
 import { fetchJobsFromGreenhouse } from "./greenhouse";
 import { fetchJobsFromLever } from "./lever";
+import { fetchJobsFromWorkday } from "./workday";
 
 export async function fetchJobsFromSource(
   source: JobSource,
@@ -17,6 +18,8 @@ export async function fetchJobsFromSource(
       return fetchJobsFromAshby(source);
     case "CUSTOM":
       return fetchJobsFromCustom(source);
+    case "WORKDAY":
+      return fetchJobsFromWorkday(source);
     default:
       throw new Error(`Unsupported provider: ${source.provider}`);
   }
