@@ -191,6 +191,12 @@ type NotifRow = {
   status: string; windowHours: number; recommendationCount: number;
   messagePreview: string | null; errorMessage: string | null;
 };
+type RecentlyScrapedJob = {
+  id: string; title: string; company: string; location: string | null;
+  employmentType: string | null; department: string | null; applyUrl: string;
+  sponsorship: string; postedAt: string | null; firstSeenAt: string;
+  lastSeenAt: string; provider: string; sourceCompany: string; snippet: string | null;
+};
 type SourceHealthRow = {
   id: string; company: string; provider: string; enabled: boolean;
   priority: number; tags: string | null; lastSyncAt: string | null;
@@ -330,7 +336,16 @@ export function JobBoardClient({
   }
 
   // Main tab
-  const [mainTab, setMainTab] = useState<"jobs" | "recommended" | "alerts" | "history" | "sources" | "profile">("jobs");
+  const [mainTab, setMainTab] = useState<"jobs" | "recommended" | "alerts" | "scraped" | "history" | "sources" | "profile">("jobs");
+
+  // Recently-scraped state
+  const [scrapedJobs, setScrapedJobs] = useState<RecentlyScrapedJob[]>([]);
+  const [scrapedTotal, setScrapedTotal] = useState(0);
+  const [scrapedTotalPages, setScrapedTotalPages] = useState(1);
+  const [scrapedPage, setScrapedPage] = useState(1);
+  const [scrapedLoading, setScrapedLoading] = useState(false);
+  const [scrapedError, setScrapedError] = useState<string | null>(null);
+  const [scrapedQ, setScrapedQ] = useState("");
 
   // Recommendation state
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -572,6 +587,26 @@ export function JobBoardClient({
       .finally(() => { clearTimeout(timer); setSourceHealthLoading(false); });
   };
 
+  const fetchScrapedJobs = (page = scrapedPage, q = scrapedQ) => {
+    setScrapedLoading(true);
+    setScrapedError(null);
+    const params = new URLSearchParams({ limit: "20", page: String(page) });
+    if (q) params.set("q", q);
+    fetch(`/api/jobs/recently-scraped?${params}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<{ jobs: RecentlyScrapedJob[]; total: number; totalPages: number; page: number }>;
+      })
+      .then((d) => {
+        setScrapedJobs(d.jobs);
+        setScrapedTotal(d.total);
+        setScrapedTotalPages(d.totalPages);
+        setScrapedPage(d.page);
+      })
+      .catch(() => { setScrapedError("Could not load recently scraped jobs."); })
+      .finally(() => { setScrapedLoading(false); });
+  };
+
   const startLiveSync = async () => {
     setLiveSyncStarting(true);
     setLiveSyncError(null);
@@ -632,6 +667,8 @@ export function JobBoardClient({
       /* eslint-enable react-hooks/set-state-in-effect */
     } else if (mainTab === "sources") {
       fetchSourceHealth(1, sourceHealthPageSize);
+    } else if (mainTab === "scraped") {
+      fetchScrapedJobs(1, "");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainTab, historySubTab]);
@@ -924,7 +961,7 @@ export function JobBoardClient({
           </div>
           {/* Tab Nav */}
           <div className="flex flex-wrap gap-1">
-            {(["jobs", "recommended", "alerts", "history", "sources", "profile"] as const).map((tab) => (
+            {(["jobs", "recommended", "alerts", "scraped", "history", "sources", "profile"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => { setMainTab(tab); setRecPage(1); }}
@@ -936,6 +973,7 @@ export function JobBoardClient({
               >
                 {tab === "jobs" && "📋 All Jobs"}
                 {tab === "recommended" && "⭐ Recommended"}
+                {tab === "scraped" && "🆕 Recently Scraped"}
                 {tab === "history" && "📊 History"}
                 {tab === "sources" && "🏢 Sources"}
                 {tab === "profile" && "👤 Profile"}
@@ -1714,6 +1752,159 @@ export function JobBoardClient({
           </div>
         )}
         </> : null}
+
+        {/* ═══════════════════════════════════════════════════════════════════
+            RECENTLY SCRAPED TAB
+            Profile-free feed: sorted by firstSeenAt DESC, no scoring/prefs.
+        ════════════════════════════════════════════════════════════════════ */}
+        {mainTab === "scraped" && (
+          <div>
+            {/* Header + controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Recently Scraped Jobs</h2>
+                <p className="text-sm text-slate-400 mt-0.5">
+                  Latest jobs discovered by JobRadar — shown before any profile matching.
+                  {scrapedTotal > 0 && <span className="ml-2 text-blue-300">{scrapedTotal.toLocaleString()} total active jobs</span>}
+                </p>
+              </div>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  placeholder="Search title / company…"
+                  value={scrapedQ}
+                  onChange={(e) => setScrapedQ(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { setScrapedPage(1); fetchScrapedJobs(1, scrapedQ); } }}
+                  className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-48"
+                />
+                <button
+                  onClick={() => { setScrapedPage(1); fetchScrapedJobs(1, scrapedQ); }}
+                  disabled={scrapedLoading}
+                  className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition disabled:opacity-50"
+                >
+                  {scrapedLoading ? "Loading…" : "🔄 Refresh"}
+                </button>
+              </div>
+            </div>
+
+            {/* Error state */}
+            {scrapedError && (
+              <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-300 mb-4">
+                {scrapedError}
+              </div>
+            )}
+
+            {/* Loading skeleton */}
+            {scrapedLoading && (
+              <div className="space-y-3">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="rounded-xl bg-slate-800/40 border border-slate-700/30 p-4 animate-pulse">
+                    <div className="h-4 bg-slate-700/50 rounded w-2/3 mb-2" />
+                    <div className="h-3 bg-slate-700/30 rounded w-1/3" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!scrapedLoading && !scrapedError && scrapedJobs.length === 0 && (
+              <div className="rounded-xl bg-slate-800/40 border border-slate-700/30 p-10 text-center text-slate-400">
+                <p className="text-4xl mb-3">🗂️</p>
+                <p className="font-medium">No scraped jobs yet.</p>
+                <p className="text-sm mt-1">Run a sync to populate this feed.</p>
+              </div>
+            )}
+
+            {/* Job cards */}
+            {!scrapedLoading && scrapedJobs.length > 0 && (
+              <div className="space-y-3">
+                {scrapedJobs.map((job) => (
+                  <div
+                    key={job.id}
+                    className="rounded-xl bg-slate-800/60 border border-slate-700/40 hover:border-slate-600/60 transition p-4"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        {/* Title + apply link */}
+                        <div className="flex items-start gap-2 flex-wrap">
+                          <a
+                            href={job.applyUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-white font-semibold hover:text-blue-300 transition text-sm leading-snug"
+                          >
+                            {job.title}
+                          </a>
+                          {job.sponsorship === "YES" && (
+                            <span className="shrink-0 text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                              Sponsors Visa
+                            </span>
+                          )}
+                          {job.sponsorship === "NO" && (
+                            <span className="shrink-0 text-xs bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded">
+                              No Sponsorship
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Company · location · employment type */}
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-slate-400">
+                          <span className="text-blue-300/80 font-medium">{job.company}</span>
+                          {job.location && <span>📍 {job.location}</span>}
+                          {job.employmentType && <span>💼 {job.employmentType}</span>}
+                          {job.department && <span>🏷️ {job.department}</span>}
+                        </div>
+
+                        {/* Snippet */}
+                        {job.snippet && (
+                          <p className="mt-1.5 text-xs text-slate-500 line-clamp-2">{job.snippet}</p>
+                        )}
+                      </div>
+
+                      {/* Timestamps */}
+                      <div className="shrink-0 text-right text-xs text-slate-500 space-y-0.5">
+                        <div className="text-emerald-400/80 font-medium">
+                          Scraped {timeAgo(job.firstSeenAt)}
+                        </div>
+                        {job.postedAt && (
+                          <div>Posted {timeAgo(job.postedAt)}</div>
+                        )}
+                        <div className="text-slate-600 uppercase tracking-wide text-[10px]">
+                          {job.provider}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Pagination */}
+            {!scrapedLoading && scrapedTotalPages > 1 && (
+              <div className="flex items-center justify-between mt-6">
+                <span className="text-xs text-slate-500">
+                  Page {scrapedPage} of {scrapedTotalPages}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { const p = scrapedPage - 1; setScrapedPage(p); fetchScrapedJobs(p, scrapedQ); }}
+                    disabled={scrapedPage <= 1}
+                    className="px-3 py-1 rounded bg-slate-700/50 disabled:opacity-30 hover:bg-slate-700 text-sm text-white transition"
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    onClick={() => { const p = scrapedPage + 1; setScrapedPage(p); fetchScrapedJobs(p, scrapedQ); }}
+                    disabled={scrapedPage >= scrapedTotalPages}
+                    className="px-3 py-1 rounded bg-slate-700/50 disabled:opacity-30 hover:bg-slate-700 text-sm text-white transition"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ═══════════════════════════════════════════════════════════════════
             HISTORY TAB
