@@ -24,10 +24,19 @@ services:
       NODE_ENV: "production"
       NODE_OPTIONS: "--max-old-space-size=640"
       ENABLE_SCHEDULER: "true"
+      # ── Workday scraper (Chromium) ──────────────────────────────────────────
+      # Browser is baked into the image; this flag is the runtime on/off switch.
+      # Only sources promoted to scraper_candidate/scraper_valid are ever scraped.
+      WORKDAY_SCRAPER_ENABLED: "true"
+      # Hard cap on concurrent Chromium instances — keep at 1 on this box.
+      WORKDAY_SCRAPER_CONCURRENCY: "1"
+      PLAYWRIGHT_CHROMIUM_PATH: "/usr/bin/chromium-browser"
     ports:
       # Bind to loopback only — nginx proxies public traffic on port 80/443.
       - "127.0.0.1:3000:3000"
     volumes:
       - ./data:/app/data
-    mem_limit: 750m
-    memswap_limit: 750m
+    # Raised from 750m to give Chromium headroom alongside the 640m Node heap.
+    # Host has 1.9G RAM + 2G swap; memswap allows brief spillover during scrapes.
+    mem_limit: 1500m
+    memswap_limit: 2500m

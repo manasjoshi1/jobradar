@@ -42,6 +42,57 @@ const MAX_PAGES   = Math.max(1, parseInt(process.env.WORKDAY_SCRAPER_MAX_PAGES  
 const MAX_SCROLLS = Math.max(1, parseInt(process.env.WORKDAY_SCRAPER_MAX_SCROLLS ?? "5",  10) || 5);
 const TIMEOUT_MS  = Math.max(5_000, parseInt(process.env.WORKDAY_SCRAPER_TIMEOUT_MS ?? "30000", 10) || 30_000);
 
+/**
+ * Max concurrent browser instances. Default 1 — critical on memory-constrained
+ * hosts. The sync service fans out fetches at SYNC_FETCH_CONCURRENCY (default 8),
+ * so without this gate up to 8 Chromium instances could launch at once and OOM.
+ */
+const SCRAPER_CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.WORKDAY_SCRAPER_CONCURRENCY ?? "1", 10) || 1,
+);
+
+/**
+ * Path to a system Chromium binary. Required on Alpine/musl, where Playwright's
+ * own glibc-built Chromium cannot run. Set in the Docker image to
+ * /usr/bin/chromium-browser (the apk `chromium` package).
+ */
+const CHROMIUM_PATH =
+  process.env.PLAYWRIGHT_CHROMIUM_PATH ||
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+  undefined;
+
+/** Container-safe Chromium launch flags. */
+const LAUNCH_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",     // avoid /dev/shm exhaustion in containers
+  "--disable-gpu",
+  "--no-zygote",
+  "--disable-extensions",
+  "--disable-background-networking",
+];
+
+// ── Concurrency gate (simple promise queue) ───────────────────────────────────
+
+let activeBrowsers = 0;
+const waitQueue: Array<() => void> = [];
+
+async function acquireSlot(): Promise<void> {
+  if (activeBrowsers < SCRAPER_CONCURRENCY) {
+    activeBrowsers++;
+    return;
+  }
+  await new Promise<void>((resolve) => waitQueue.push(resolve));
+  activeBrowsers++;
+}
+
+function releaseSlot(): void {
+  activeBrowsers--;
+  const next = waitQueue.shift();
+  if (next) next();
+}
+
 // ── Result types ────────────────────────────────────────────────────────────
 
 export type ScrapeMode = "api_discovered" | "dom" | "blocked" | "empty";
@@ -255,11 +306,18 @@ export async function scrapeWorkdaySource(
   // Lazy import so Playwright is only loaded when scraping is actually used
   const { chromium } = await import("playwright");
 
+  // Gate concurrency BEFORE launching — prevents N parallel Chromiums (OOM).
+  await acquireSlot();
+
   let browser: Browser | null = null;
   const cxsCandidates: Array<{ url: string; total: number; postings: unknown[] }> = [];
 
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      args:     LAUNCH_ARGS,
+      ...(CHROMIUM_PATH ? { executablePath: CHROMIUM_PATH } : {}),
+    });
     const ctx = await browser.newContext({
       userAgent: "Mozilla/5.0 (compatible; JobRadarScraper/1.0)",
     });
@@ -339,5 +397,6 @@ export async function scrapeWorkdaySource(
     };
   } finally {
     await browser?.close().catch(() => {});
+    releaseSlot();
   }
 }
