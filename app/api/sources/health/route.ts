@@ -26,6 +26,8 @@ export async function GET(request: NextRequest) {
       tags: true,
       lastSyncAt: true,
       lastSyncStatus: true,
+      verificationStatus: true,
+      fetchStrategy: true,
     },
   });
 

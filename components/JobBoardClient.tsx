@@ -202,7 +202,56 @@ type SourceHealthRow = {
   priority: number; tags: string | null; lastSyncAt: string | null;
   lastSyncStatus: string | null; activeJobCount: number; totalJobCount: number;
   latestJobSeenAt: string | null;
+  verificationStatus: string | null; fetchStrategy: string | null;
 };
+type WorkdaySummary = {
+  scraperEnabled: boolean;
+  total: number;
+  enabled: number;
+  disabled: number;
+  byStatus: Record<string, number>;
+  byStrategy: Record<string, number>;
+};
+
+// ── Workday lifecycle status presentation ────────────────────────────────────
+const WORKDAY_STATUS_HELP: Record<string, string> = {
+  unverified:        "Not yet classified — will be verified on next sync",
+  api_valid:         "Public CXS JSON API works — synced normally",
+  scraper_valid:     "Scraped successfully via headless browser",
+  scraper_candidate: "Queued for browser scraping (curated)",
+  temporary_failure: "Transient error (timeout/5xx/429) — retried with backoff",
+  wrong_site_slug:   "HTTP 422 — host valid but site slug wrong; in slug-discovery queue",
+  auth_blocked:      "HTTP 401 — credentials required; not publicly accessible",
+  browser_required:  "HTTP 403 / challenge — needs a browser; not hammered",
+  host_dead:         "HTTP 404 / DNS failure — host does not resolve",
+  invalid_schema:    "HTTP 200 but response is not valid Workday JSON",
+  disabled:          "Manually disabled",
+};
+function workdayStatusLabel(status: string): string {
+  return status.replace(/_/g, " ");
+}
+function workdayStatusClasses(status: string): string {
+  switch (status) {
+    case "api_valid":
+    case "scraper_valid":
+      return "text-emerald-300 border-emerald-500/40 bg-emerald-900/20";
+    case "scraper_candidate":
+      return "text-cyan-300 border-cyan-500/40 bg-cyan-900/20";
+    case "temporary_failure":
+      return "text-amber-300 border-amber-500/40 bg-amber-900/20";
+    case "wrong_site_slug":
+      return "text-orange-300 border-orange-500/40 bg-orange-900/20";
+    case "auth_blocked":
+    case "browser_required":
+      return "text-fuchsia-300 border-fuchsia-500/40 bg-fuchsia-900/20";
+    case "host_dead":
+    case "invalid_schema":
+    case "disabled":
+      return "text-red-300 border-red-500/40 bg-red-900/20";
+    default:
+      return "text-slate-400 border-slate-600 bg-slate-800/40";
+  }
+}
 type TimelineJob = {
   id: string; company: string; title: string; location: string | null;
   applyUrl: string; sponsorship: string; status: string;
@@ -391,6 +440,7 @@ export function JobBoardClient({
   const [sourceHealthTotal, setSourceHealthTotal] = useState(0);
   const [sourceHealthTotalPages, setSourceHealthTotalPages] = useState(1);
   const [sourceHealthError, setSourceHealthError] = useState<string | null>(null);
+  const [workdaySummary, setWorkdaySummary] = useState<WorkdaySummary | null>(null);
 
   // Live sync progress state
   const [liveSyncRunId, setLiveSyncRunId] = useState<string | null>(null);
@@ -585,6 +635,12 @@ export function JobBoardClient({
         }
       })
       .finally(() => { clearTimeout(timer); setSourceHealthLoading(false); });
+
+    // Workday lifecycle summary (best-effort; non-blocking)
+    fetch("/api/sources/workday/summary")
+      .then((r) => (r.ok ? (r.json() as Promise<WorkdaySummary>) : null))
+      .then((d) => { if (d) setWorkdaySummary(d); })
+      .catch(() => { /* ignore — panel just hides */ });
   };
 
   const fetchScrapedJobs = (page = scrapedPage, q = scrapedQ) => {
@@ -2237,6 +2293,53 @@ export function JobBoardClient({
               </div>
             </div>
 
+            {/* Workday lifecycle summary */}
+            {workdaySummary && workdaySummary.total > 0 && (
+              <div className="mb-5 rounded-xl border border-indigo-500/25 bg-indigo-950/20 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <h3 className="text-sm font-bold text-indigo-200 flex items-center gap-2">
+                    🧭 Workday Source Lifecycle
+                    <span className="text-xs font-normal text-slate-400">({workdaySummary.total} sources)</span>
+                  </h3>
+                  <span
+                    className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                      workdaySummary.scraperEnabled
+                        ? "text-emerald-300 border-emerald-500/40 bg-emerald-900/30"
+                        : "text-slate-400 border-slate-600 bg-slate-800/50"
+                    }`}
+                    title="Browser scraper master switch (WORKDAY_SCRAPER_ENABLED)"
+                  >
+                    {workdaySummary.scraperEnabled ? "🟢 Scraper ON" : "⚪ Scraper OFF"}
+                  </span>
+                </div>
+
+                {/* Enabled / disabled */}
+                <div className="flex gap-2 mb-3 text-xs">
+                  <span className="px-2 py-1 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-500/30">
+                    {workdaySummary.enabled} enabled
+                  </span>
+                  <span className="px-2 py-1 rounded bg-slate-800/60 text-slate-400 border border-slate-600">
+                    {workdaySummary.disabled} disabled
+                  </span>
+                </div>
+
+                {/* Status breakdown */}
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(workdaySummary.byStatus)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([status, count]) => (
+                      <span
+                        key={status}
+                        className={`text-xs px-2 py-1 rounded-md border ${workdayStatusClasses(status)}`}
+                        title={WORKDAY_STATUS_HELP[status] ?? status}
+                      >
+                        {workdayStatusLabel(status)} · <span className="font-semibold">{count}</span>
+                      </span>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {/* Error */}
             {sourceHealthError && (
               <div className="rounded-lg bg-red-900/30 border border-red-500/30 text-red-400 text-sm px-4 py-3 mb-4 flex justify-between items-center">
@@ -2262,6 +2365,7 @@ export function JobBoardClient({
                       <tr>
                         <th className="px-4 py-3">Company</th>
                         <th className="px-4 py-3">Provider</th>
+                        <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3">Enabled</th>
                         <th className="px-4 py-3">Last Sync</th>
                         <th className="px-4 py-3">Last Status</th>
@@ -2278,6 +2382,18 @@ export function JobBoardClient({
                           <tr key={s.id} className="bg-slate-800/40 hover:bg-slate-800/70">
                             <td className="px-4 py-3 font-medium text-white">{s.company}</td>
                             <td className="px-4 py-3 text-slate-400 text-xs uppercase">{s.provider}</td>
+                            <td className="px-4 py-3">
+                              {s.verificationStatus ? (
+                                <span
+                                  className={`text-[11px] px-2 py-0.5 rounded-md border ${workdayStatusClasses(s.verificationStatus)}`}
+                                  title={`${WORKDAY_STATUS_HELP[s.verificationStatus] ?? s.verificationStatus}${s.fetchStrategy ? ` · ${s.fetchStrategy}` : ""}`}
+                                >
+                                  {workdayStatusLabel(s.verificationStatus)}
+                                </span>
+                              ) : (
+                                <span className="text-slate-600 text-xs">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3">
                               <span className={`text-xs font-semibold ${s.enabled ? "text-emerald-400" : "text-slate-500"}`}>
                                 {s.enabled ? "✓" : "✗"}
