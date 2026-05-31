@@ -16,6 +16,7 @@
 
 import { prisma } from "@/lib/prisma";
 import type { JobSource } from "@prisma/client";
+import { SYNC_EXCLUDED_STATUSES } from "@/lib/workday/lifecycle";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -115,6 +116,42 @@ export async function resolveUserSources(userId: string): Promise<UserSourceReso
   };
 }
 
+// ── Sync-eligible source filter ───────────────────────────────────────────────
+
+/**
+ * Shared WHERE clause for fetching sources that are eligible for sync.
+ *
+ * A source is eligible when:
+ *   - enabled = true
+ *   - nextRetryAt is null OR nextRetryAt <= now  (not in backoff)
+ *   - NOT (provider=WORKDAY AND verificationStatus in excluded list)
+ *
+ * Non-Workday sources are unaffected: verificationStatus is null for them,
+ * so the NOT-Workday branch always passes.
+ */
+function syncEligibleWhere(now: Date = new Date()) {
+  return {
+    enabled: true,
+    AND: [
+      // Backoff gate: skip sources whose retry window hasn't expired
+      {
+        OR: [
+          { nextRetryAt: null },
+          { nextRetryAt: { lte: now } },
+        ],
+      },
+      // Workday lifecycle gate: exclude permanently-failed Workday sources
+      {
+        OR: [
+          { provider: { not: "WORKDAY" } },
+          { verificationStatus: null },
+          { verificationStatus: { notIn: SYNC_EXCLUDED_STATUSES as string[] } },
+        ],
+      },
+    ],
+  };
+}
+
 // ── Global sync resolution (which sources to actually fetch from) ─────────────
 
 /**
@@ -125,19 +162,25 @@ export async function resolveUserSources(userId: string): Promise<UserSourceReso
  *   - At least one user has it in their UserJobSource (with enabled=true), OR
  *   - At least one user has useGlobalDefaultSources=true (in which case ALL global sources are included)
  *
+ * Workday sources with a permanent failure classification are excluded from
+ * the sync regardless of their enabled flag.
+ *
  * If neither condition is met for any user → NO_SOURCES_CONFIGURED.
  */
 export async function resolveGlobalSyncSources(): Promise<GlobalSyncResolution> {
+  const now = new Date();
+  const eligibleWhere = syncEligibleWhere(now);
+
   const [userSourceCount, globalOptInCount, globalSourceCount] = await Promise.all([
     prisma.userJobSource.count({ where: { enabled: true } }),
     prisma.userJobPreference.count({ where: { useGlobalDefaultSources: true } }),
-    prisma.jobSource.count({ where: { enabled: true } }),
+    prisma.jobSource.count({ where: eligibleWhere }),
   ]);
 
-  // Case: at least one user opted into global defaults → sync ALL global sources
+  // Case: at least one user opted into global defaults → sync ALL eligible global sources
   if (globalOptInCount > 0) {
     const sources = await prisma.jobSource.findMany({
-      where:   { enabled: true },
+      where:   eligibleWhere,
       orderBy: [{ provider: "asc" }, { company: "asc" }],
     });
     return {
@@ -146,20 +189,19 @@ export async function resolveGlobalSyncSources(): Promise<GlobalSyncResolution> 
       globalSourceCount,
       profileSourceCount: userSourceCount,
       reason:             sources.length > 0 ? null : NO_SOURCES_CONFIGURED,
-      message:            sources.length > 0 ? null : "No global sources are enabled.",
+      message:            sources.length > 0 ? null : "No global sources are eligible for sync.",
     };
   }
 
-  // Case: users have explicit source selections → sync the union
+  // Case: users have explicit source selections → sync the eligible union
   if (userSourceCount > 0) {
     const userSourceLinks = await prisma.userJobSource.findMany({
       where:  { enabled: true },
       select: { sourceId: true },
-      // dedup at query level would need groupBy; deduplicate in JS instead
     });
     const sourceIdSet = new Set(userSourceLinks.map((u) => u.sourceId));
     const sources = await prisma.jobSource.findMany({
-      where:   { enabled: true, id: { in: [...sourceIdSet] } },
+      where:   { ...eligibleWhere, id: { in: [...sourceIdSet] } },
       orderBy: [{ provider: "asc" }, { company: "asc" }],
     });
     return {
@@ -173,7 +215,8 @@ export async function resolveGlobalSyncSources(): Promise<GlobalSyncResolution> 
   }
 
   // Case: no sources configured anywhere
-  const message = globalSourceCount > 0
+  const totalEnabled = await prisma.jobSource.count({ where: { enabled: true } });
+  const message = totalEnabled > 0
     ? "No sources configured. Enable global defaults to use the shared source list, or upload sources."
     : "No sources configured and no global sources are available.";
 

@@ -25,8 +25,23 @@ model JobSource {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  // ── Workday / advanced lifecycle fields ─────────────────────────────────────
+  /// "API" | "SCRAPER" | "AUTO" | "DISABLED"  (null = provider default)
+  fetchStrategy      String?
+  /// "unverified" | "api_valid" | "wrong_site_slug" | "auth_blocked" |
+  /// "browser_required" | "host_dead" | "invalid_schema" |
+  /// "temporary_failure" | "scraper_candidate" | "scraper_valid" | "disabled"
+  verificationStatus String?
+  /// When non-null, source is in backoff and must not be synced before this time
+  nextRetryAt        DateTime?
+  /// JSON blob — failure counts, last error, high-priority flag, per-provider metadata
+  metadata           String?
+
   jobs        Job[]
   userSources UserJobSource[]
+
+  @@index([provider, verificationStatus])
+  @@index([enabled, nextRetryAt])
 }
 
 model Job {
