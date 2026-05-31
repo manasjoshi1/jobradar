@@ -50,6 +50,45 @@ export const SYNC_EXCLUDED_STATUSES: WorkdayVerificationStatus[] = [
   "disabled",
 ];
 
+/**
+ * Decide whether a Workday source is eligible for browser scraping right now.
+ *
+ * Scraping requires ALL of:
+ *   - WORKDAY_SCRAPER_ENABLED=true (checked by caller via `scraperEnabled`)
+ *   - fetchStrategy in SCRAPER | AUTO
+ *   - verificationStatus in scraper_candidate | scraper_valid
+ *   - source.enabled = true
+ *   - not in backoff (caller checks nextRetryAt)
+ *
+ * Never scrape auth_blocked, host_dead, invalid_schema, or disabled sources.
+ */
+export function isScraperEligible(
+  source: Pick<JobSource, "enabled" | "fetchStrategy" | "verificationStatus" | "metadata">,
+  scraperEnabled: boolean,
+): boolean {
+  if (!scraperEnabled) return false;
+  if (!source.enabled) return false;
+
+  const meta = parseWorkdayMeta(source);
+  if (meta.manuallyDisabled) return false;
+
+  const strategy = (source.fetchStrategy ?? meta.fetchStrategy) as WorkdayFetchStrategy | null;
+  if (strategy !== "SCRAPER" && strategy !== "AUTO") return false;
+
+  const status = (source.verificationStatus ?? meta.verificationStatus) as WorkdayVerificationStatus | null;
+  if (status !== "scraper_candidate" && status !== "scraper_valid") return false;
+
+  return true;
+}
+
+/** Statuses that must NEVER be scraped, regardless of strategy. */
+export const SCRAPER_FORBIDDEN_STATUSES: WorkdayVerificationStatus[] = [
+  "auth_blocked",
+  "host_dead",
+  "invalid_schema",
+  "disabled",
+];
+
 /** Extended Workday metadata stored in JobSource.metadata JSON. */
 export type WorkdaySourceMeta = {
   verificationStatus:   WorkdayVerificationStatus;

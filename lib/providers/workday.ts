@@ -1,34 +1,49 @@
 /**
  * lib/providers/workday.ts
  *
- * Fetches jobs from Workday's undocumented public JSON API.
- * Endpoint: POST https://{host}/wday/cxs/{tenant}/{site}/jobs
+ * Fetches jobs from Workday. Entry point `fetchJobsFromWorkday` dispatches by
+ * the source's fetchStrategy:
  *
- * "Latest jobs only" strategy:
- *   - Fetches up to WORKDAY_MAX_PAGES pages (default 5, 20 jobs/page = 100 jobs max)
- *   - Stops early once it hits a job older than WORKDAY_MAX_AGE_DAYS (default 14)
+ *   API / null / AUTO(api_valid)  → CXS JSON API (fetchWorkdayApiJobs)
+ *   SCRAPER / AUTO(scraper_*)     → Playwright scraper (fetchWorkdayScrapedJobs)
  *
- * Lifecycle behaviour:
- *   - On success: updates source to api_valid, resets failure counts.
- *   - On permanent failure (422/401/404/403): classifies, disables source, returns [].
- *   - On temporary failure (5xx/timeout): classifies, sets nextRetryAt, throws so
- *     sync-service records the failure and counts it.
+ * The API path:
+ *   - "Latest jobs only": up to WORKDAY_MAX_PAGES pages, stops at jobs older
+ *     than WORKDAY_MAX_AGE_DAYS, or when offset >= total.
+ *   - Classifies every failure; persists lifecycle state asynchronously.
+ *   - Permanent failures (422/401/403/404) return [] silently.
+ *   - Temporary failures (5xx/timeout) re-throw → sync-service applies backoff.
+ *
+ * The scraper path (opt-in, WORKDAY_SCRAPER_ENABLED=true):
+ *   - Discovers the CXS endpoint via browser network capture; if directly
+ *     POST-able, promotes the source back to API mode.
+ *   - Otherwise scrapes the DOM.
+ *   - CAPTCHA/auth walls → browser_required, no hourly retry.
  *
  * Env vars:
- *   WORKDAY_MAX_PAGES    — max pages to fetch per source  (default: 5)
- *   WORKDAY_PAGE_SIZE    — jobs per page                  (default: 20, max 20)
- *   WORKDAY_MAX_AGE_DAYS — oldest job to include in days  (default: 14)
+ *   WORKDAY_MAX_PAGES    (5)   WORKDAY_PAGE_SIZE (20)   WORKDAY_MAX_AGE_DAYS (14)
+ *   WORKDAY_SCRAPER_ENABLED (false)
  */
 
 import type { JobSource } from "@prisma/client";
 import type { NormalizedJob } from "../types";
-import { normalizeLocation } from "../normalizers";
 import { prisma } from "../prisma";
 import {
   classifyWorkdayFailure,
   buildWorkdaySourceUpdate,
   parseWorkdayMeta,
+  isScraperEligible,
 } from "../workday/lifecycle";
+import {
+  parseWorkdayPostedOn,
+  isWithinDays,
+  normalizeWorkdayApiJob,
+  parseCxsUrl,
+} from "../workday/parse";
+import {
+  scrapeWorkdaySource,
+  WORKDAY_SCRAPER_ENABLED,
+} from "../workday/scraper";
 
 const FETCH_TIMEOUT_MS = Math.max(
   5_000,
@@ -38,85 +53,19 @@ const MAX_PAGES    = Math.max(1, parseInt(process.env.WORKDAY_MAX_PAGES    ?? "5
 const PAGE_SIZE    = Math.min(20, Math.max(1, parseInt(process.env.WORKDAY_PAGE_SIZE ?? "20", 10) || 20));
 const MAX_AGE_DAYS = Math.max(1, parseInt(process.env.WORKDAY_MAX_AGE_DAYS ?? "14", 10) || 14);
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// Re-export for backward compatibility (existing imports / tests)
+export { parseWorkdayPostedOn };
 
-type WorkdayPosting = {
-  title?:               string;
-  externalPath?:        string;
-  locationsText?:       string;
-  postedOn?:            string;
-  bulletFields?:        string[];
-  jobReqId?:            string;
-  additionalLocations?: Array<{ locationsText?: string }>;
-};
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type WorkdayResponse = {
   total?:       number;
-  jobPostings?: WorkdayPosting[];
+  jobPostings?: Array<Record<string, unknown>>;
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── CXS page fetch ──────────────────────────────────────────────────────────
 
-export function parseWorkdayPostedOn(postedOn: string | undefined): string | undefined {
-  if (!postedOn) return undefined;
-  const s = postedOn.toLowerCase().trim();
-
-  if (s.includes("today") || s.includes("just posted")) return new Date().toISOString();
-
-  const daysMatch = s.match(/(\d+)\s+day/);
-  if (daysMatch) {
-    const d = new Date();
-    d.setDate(d.getDate() - parseInt(daysMatch[1], 10));
-    return d.toISOString();
-  }
-
-  const weeksMatch = s.match(/(\d+)\s+week/);
-  if (weeksMatch) {
-    const d = new Date();
-    d.setDate(d.getDate() - parseInt(weeksMatch[1], 10) * 7);
-    return d.toISOString();
-  }
-
-  const monthsMatch = s.match(/(\d+)\s+month/);
-  if (monthsMatch) {
-    const d = new Date();
-    d.setMonth(d.getMonth() - parseInt(monthsMatch[1], 10));
-    return d.toISOString();
-  }
-
-  return undefined;
-}
-
-function isRecentEnough(postedOn: string | undefined, maxAgeDays: number): boolean {
-  if (!postedOn) return true;
-  const s = postedOn.toLowerCase();
-  if (s.includes("30+")) return false;
-
-  const daysMatch = s.match(/(\d+)\s+day/);
-  if (daysMatch) return parseInt(daysMatch[1], 10) <= maxAgeDays;
-
-  const weeksMatch = s.match(/(\d+)\s+week/);
-  if (weeksMatch) return parseInt(weeksMatch[1], 10) * 7 <= maxAgeDays;
-
-  if (s.includes("month")) return false;
-  return true;
-}
-
-function buildApplyUrl(apiUrl: string, externalPath: string): string {
-  try {
-    const u     = new URL(apiUrl);
-    const parts = u.pathname.split("/").filter(Boolean);
-    const site  = parts[3] ?? "";
-    return `${u.protocol}//${u.host}/en-US/${site}${externalPath}`;
-  } catch {
-    return apiUrl;
-  }
-}
-
-/**
- * POST one page. Returns { status, body } — never throws on HTTP errors.
- * Throws only on AbortError (timeout) or unrecoverable network failure.
- */
+/** POST one page. Returns { status, body }; never throws on HTTP errors. */
 async function fetchWorkdayPage(
   apiUrl: string,
   offset: number,
@@ -124,7 +73,6 @@ async function fetchWorkdayPage(
 ): Promise<{ status: number; body: WorkdayResponse }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
   try {
     const res = await fetch(apiUrl, {
       method:  "POST",
@@ -136,7 +84,6 @@ async function fetchWorkdayPage(
       body:   JSON.stringify({ appliedFacets: {}, limit, offset, searchText: "" }),
       signal: controller.signal,
     });
-
     if (!res.ok) return { status: res.status, body: {} };
 
     let body: WorkdayResponse = {};
@@ -144,32 +91,30 @@ async function fetchWorkdayPage(
       const text = await res.text();
       if (text.trimStart().startsWith("<")) return { status: 200, body: {} }; // HTML → invalid_schema
       body = JSON.parse(text) as WorkdayResponse;
-    } catch {
-      // JSON parse error → invalid_schema
-    }
-
+    } catch { /* JSON parse error → invalid_schema */ }
     return { status: 200, body };
   } finally {
     clearTimeout(timer);
   }
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── API fetcher ───────────────────────────────────────────────────────────────
 
-export async function fetchJobsFromWorkday(source: JobSource): Promise<NormalizedJob[]> {
-  const meta          = parseWorkdayMeta(source);
+async function fetchWorkdayApiJobs(source: JobSource): Promise<NormalizedJob[]> {
+  const meta = parseWorkdayMeta(source);
   const jobs: NormalizedJob[] = [];
-  let   reachedOldJobs = false;
-  let   lastStatus: number | null = null;
-  let   lastBody: unknown         = null;
-  let   fetchError: Error | null  = null;
+  let lastStatus: number | null = null;
+  let lastBody: unknown         = null;
+  let fetchError: Error | null  = null;
+  let stop = false;
 
-  // ── Fetch pages ───────────────────────────────────────────────────────────
   try {
-    for (let page = 0; page < MAX_PAGES && !reachedOldJobs; page++) {
+    for (let page = 0; page < MAX_PAGES && !stop; page++) {
+      const offset = page * PAGE_SIZE;
+
       let pageResult: { status: number; body: WorkdayResponse };
       try {
-        pageResult = await fetchWorkdayPage(source.url, page * PAGE_SIZE, PAGE_SIZE);
+        pageResult = await fetchWorkdayPage(source.url, offset, PAGE_SIZE);
       } catch (err) {
         fetchError = err instanceof Error ? err : new Error(String(err));
         break;
@@ -177,51 +122,31 @@ export async function fetchJobsFromWorkday(source: JobSource): Promise<Normalize
 
       lastStatus = pageResult.status;
       lastBody   = pageResult.body;
-
       if (lastStatus !== 200) break;
 
+      const total    = Number(pageResult.body.total);
       const postings = pageResult.body.jobPostings ?? [];
       if (postings.length === 0) break;
 
-      for (const p of postings) {
-        const title = p.title?.trim();
-        if (!title) continue;
+      let pageHasRecent = false;
+      for (const posting of postings) {
+        const postedAt = parseWorkdayPostedOn(posting.postedOn as string | undefined);
+        if (isWithinDays(postedAt, MAX_AGE_DAYS)) pageHasRecent = true;
 
-        if (!isRecentEnough(p.postedOn, MAX_AGE_DAYS)) {
-          reachedOldJobs = true;
-          break;
-        }
-
-        const externalPath = p.externalPath ?? "";
-        const applyUrl     = externalPath ? buildApplyUrl(source.url, externalPath) : source.url;
-
-        const locationParts = [
-          p.locationsText,
-          ...(p.additionalLocations ?? []).map((l) => l.locationsText).filter(Boolean),
-        ].filter(Boolean);
-
-        const employmentType = p.bulletFields?.find(
-          (f) => /full.time|part.time|contract|temporary|intern/i.test(f),
-        );
-
-        jobs.push({
-          externalId:     p.jobReqId || undefined,
-          company:        source.company,
-          title,
-          location:       normalizeLocation(locationParts[0]),
-          applyUrl,
-          postedAt:       parseWorkdayPostedOn(p.postedOn),
-          employmentType: employmentType || undefined,
-        });
+        const job = normalizeWorkdayApiJob(posting, source);
+        if (job) jobs.push(job);
       }
 
-      if (postings.length < PAGE_SIZE) break;
+      // Stop conditions
+      if (!pageHasRecent) break;                      // entire page is stale
+      if (postings.length < PAGE_SIZE) break;         // last page
+      if (Number.isFinite(total) && offset + PAGE_SIZE >= total) break;
     }
   } catch (err) {
     fetchError = err instanceof Error ? err : new Error(String(err));
   }
 
-  // ── Classify and persist lifecycle state ──────────────────────────────────
+  // ── Classify and persist ───────────────────────────────────────────────────
   const classification = classifyWorkdayFailure({
     httpStatus:   lastStatus,
     body:         lastBody,
@@ -230,7 +155,6 @@ export async function fetchJobsFromWorkday(source: JobSource): Promise<Normalize
     highPriority: meta.highPriority,
   });
 
-  // If we collected jobs (possibly after earlier pages succeeded), force api_valid
   const effective = jobs.length > 0
     ? {
         ...classification,
@@ -243,7 +167,6 @@ export async function fetchJobsFromWorkday(source: JobSource): Promise<Normalize
       }
     : classification;
 
-  // Persist asynchronously — don't block or crash the sync
   prisma.jobSource
     .update({
       where: { id: source.id },
@@ -253,25 +176,155 @@ export async function fetchJobsFromWorkday(source: JobSource): Promise<Normalize
         lastJobCount: jobs.length,
       }),
     })
-    .catch((e) =>
-      console.warn(`[workday] metadata update failed for ${source.company}:`, e),
-    );
+    .catch((e) => console.warn(`[workday] metadata update failed for ${source.company}:`, e));
 
-  // ── Return or rethrow ─────────────────────────────────────────────────────
   if (jobs.length > 0) return jobs;
 
   if (fetchError && effective.verificationStatus === "temporary_failure") {
-    // Re-throw so sync-service records a failure and applies backoff via nextRetryAt
     throw new Error(`Workday temporary failure for ${source.company}: ${fetchError.message}`);
   }
 
-  // Permanent failure — log and return [] (sync continues with other sources)
   if (effective.verificationStatus !== "api_valid") {
     console.log(
       `[workday] ${source.company} classified as ${effective.verificationStatus} ` +
-      `(HTTP ${lastStatus ?? "n/a"}). Source disabled; returning [] silently.`,
+      `(HTTP ${lastStatus ?? "n/a"}). Returning [] silently.`,
     );
   }
-
   return [];
+}
+
+// ── Scraper fetcher ─────────────────────────────────────────────────────────
+
+async function fetchWorkdayScrapedJobs(source: JobSource): Promise<NormalizedJob[]> {
+  const meta = parseWorkdayMeta(source);
+  const result = await scrapeWorkdaySource({ company: source.company, url: source.url });
+  const now = new Date();
+
+  // ── Blocked (CAPTCHA / auth / Cloudflare) ─────────────────────────────────
+  if (result.mode === "blocked") {
+    prisma.jobSource
+      .update({
+        where: { id: source.id },
+        data: {
+          enabled:            false,
+          verificationStatus: "browser_required",
+          fetchStrategy:      "DISABLED",
+          metadata: JSON.stringify({
+            workday: {
+              ...meta,
+              verificationStatus: "browser_required",
+              fetchStrategy:      "DISABLED",
+              lastVerifiedAt:     now.toISOString(),
+              lastFailedSyncAt:   now.toISOString(),
+              lastError:          `scraper blocked: ${result.blockReason ?? "unknown"}`,
+            },
+          }),
+          lastSyncAt:     now,
+          lastSyncStatus: `browser_required: ${result.blockReason ?? "blocked"}`,
+        },
+      })
+      .catch(() => {});
+    console.log(`[workday-scraper] ${source.company} blocked (${result.blockReason}); disabled, no retry.`);
+    return [];
+  }
+
+  // ── API endpoint discovered → switch source to API mode ────────────────────
+  if (result.mode === "api_discovered" && result.discovery) {
+    const apiUrl = result.discovery.apiUrl;
+    // Avoid UNIQUE collision: only update url if no other source owns it
+    const existing = await prisma.jobSource.findUnique({ where: { url: apiUrl } }).catch(() => null);
+    const updateUrl = !existing || existing.id === source.id;
+
+    prisma.jobSource
+      .update({
+        where: { id: source.id },
+        data: {
+          ...(updateUrl ? { url: apiUrl } : {}),
+          enabled:            true,
+          verificationStatus: "api_valid",
+          fetchStrategy:      "API",
+          nextRetryAt:        null,
+          metadata: JSON.stringify({
+            workday: {
+              ...meta,
+              verificationStatus:      "api_valid",
+              fetchStrategy:           "API",
+              lastStatusCode:          200,
+              lastVerifiedAt:          now.toISOString(),
+              lastSuccessfulSyncAt:    now.toISOString(),
+              failureCount:            0,
+              consecutiveFailureCount: 0,
+              lastError:               null,
+              lastJobCount:            result.jobs.length,
+            },
+          }),
+          lastSyncAt:     now,
+          lastSyncStatus: `OK: CXS discovered via browser (${result.discovery.total} total)`,
+        },
+      })
+      .catch((e) => console.warn(`[workday-scraper] promote-to-API update failed for ${source.company}:`, e));
+
+    console.log(`[workday-scraper] ${source.company} → CXS endpoint discovered; switched to API mode.`);
+    return result.jobs;
+  }
+
+  // ── DOM scrape succeeded ───────────────────────────────────────────────────
+  if (result.mode === "dom" && result.jobs.length > 0) {
+    prisma.jobSource
+      .update({
+        where: { id: source.id },
+        data: {
+          enabled:            true,
+          verificationStatus: "scraper_valid",
+          fetchStrategy:      "SCRAPER",
+          nextRetryAt:        null,
+          metadata: JSON.stringify({
+            workday: {
+              ...meta,
+              verificationStatus:      "scraper_valid",
+              fetchStrategy:           "SCRAPER",
+              lastVerifiedAt:          now.toISOString(),
+              lastSuccessfulSyncAt:    now.toISOString(),
+              failureCount:            0,
+              consecutiveFailureCount: 0,
+              lastError:               null,
+              lastJobCount:            result.jobs.length,
+            },
+          }),
+          lastSyncAt:     now,
+          lastSyncStatus: `OK: scraped ${result.jobs.length} jobs (DOM)`,
+        },
+      })
+      .catch((e) => console.warn(`[workday-scraper] scraper_valid update failed for ${source.company}:`, e));
+
+    return result.jobs;
+  }
+
+  // ── Empty — page rendered but no jobs found ───────────────────────────────
+  prisma.jobSource
+    .update({
+      where: { id: source.id },
+      data: {
+        metadata: JSON.stringify({
+          workday: { ...meta, lastVerifiedAt: now.toISOString(), lastJobCount: 0 },
+        }),
+        lastSyncAt:     now,
+        lastSyncStatus: "scraper: no jobs found on page",
+      },
+    })
+    .catch(() => {});
+  return [];
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+export async function fetchJobsFromWorkday(source: JobSource): Promise<NormalizedJob[]> {
+  // Decide path. Scraper only when explicitly enabled + eligible.
+  if (isScraperEligible(source, WORKDAY_SCRAPER_ENABLED)) {
+    // Safety: never scrape a source without a derivable public page
+    if (parseCxsUrl(source.url)) {
+      return fetchWorkdayScrapedJobs(source);
+    }
+  }
+  return fetchWorkdayApiJobs(source);
 }
