@@ -106,10 +106,9 @@ async function fetchWorkdayApiJobs(source: JobSource): Promise<NormalizedJob[]> 
   let lastStatus: number | null = null;
   let lastBody: unknown         = null;
   let fetchError: Error | null  = null;
-  let stop = false;
 
   try {
-    for (let page = 0; page < MAX_PAGES && !stop; page++) {
+    for (let page = 0; page < MAX_PAGES; page++) {
       const offset = page * PAGE_SIZE;
 
       let pageResult: { status: number; body: WorkdayResponse };

@@ -18,8 +18,11 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Minimal source shape accepted by buildWorkdaySourceUpdate / parseWorkdayMeta. */
+type SourceLike = { metadata: string | null; enabled: boolean };
+
 const VALID_BODY = { total: 42, jobPostings: [{ title: "Engineer" }] };
-const EMPTY_SOURCE = { metadata: null, enabled: true } as any;
+const EMPTY_SOURCE: SourceLike = { metadata: null, enabled: true };
 
 // ── 1. api_valid ──────────────────────────────────────────────────────────────
 
@@ -237,10 +240,10 @@ describe("parseWorkdayMeta / serializeWorkdayMeta", () => {
 
 describe("buildWorkdaySourceUpdate", () => {
   it("does NOT re-enable a manually disabled source", () => {
-    const source = {
+    const source: SourceLike = {
       metadata: JSON.stringify({ workday: { manuallyDisabled: true } }),
       enabled:  false,
-    } as any;
+    };
     const classification = classifyWorkdayFailure({ httpStatus: 200, body: VALID_BODY });
     const update = buildWorkdaySourceUpdate(source, classification);
     expect(update.enabled).toBe(false); // must stay disabled
@@ -276,7 +279,7 @@ describe("buildWorkdaySourceUpdate", () => {
   });
 
   it("increments failure count on each failure", () => {
-    const source1 = { metadata: null, enabled: true } as any;
+    const source1: SourceLike = { metadata: null, enabled: true };
     const cl = classifyWorkdayFailure({ httpStatus: 500, failureCount: 0 });
 
     const upd1 = buildWorkdaySourceUpdate(source1, cl);
@@ -285,7 +288,7 @@ describe("buildWorkdaySourceUpdate", () => {
     expect(meta1.consecutiveFailureCount).toBe(1);
 
     // Second failure using updated metadata
-    const source2 = { metadata: upd1.metadata, enabled: true } as any;
+    const source2: SourceLike = { metadata: upd1.metadata, enabled: true };
     const upd2 = buildWorkdaySourceUpdate(source2, cl);
     const meta2 = parseWorkdayMeta({ metadata: upd2.metadata });
     expect(meta2.failureCount).toBe(2);
@@ -293,10 +296,10 @@ describe("buildWorkdaySourceUpdate", () => {
   });
 
   it("resets failure counts on api_valid", () => {
-    const source = {
+    const source: SourceLike = {
       metadata: JSON.stringify({ workday: { failureCount: 5, consecutiveFailureCount: 5 } }),
       enabled:  true,
-    } as any;
+    };
     const upd = buildWorkdaySourceUpdate(
       source,
       classifyWorkdayFailure({ httpStatus: 200, body: VALID_BODY }),

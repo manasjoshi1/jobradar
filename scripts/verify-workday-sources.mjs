@@ -206,7 +206,6 @@ async function main() {
   }
 
   // Process in batches of CONCURRENCY
-  const stats = {};
   for (let i = 0; i < sources.length; i += CONCURRENCY) {
     const batch = sources.slice(i, i + CONCURRENCY);
     await Promise.all(batch.map(s => processSource(s, csvStream)));

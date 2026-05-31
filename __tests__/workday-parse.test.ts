@@ -153,12 +153,18 @@ describe("normalizeWorkdayDomJob", () => {
 // ── isScraperEligible (acceptance criteria 9 & 10) ────────────────────────────
 
 describe("isScraperEligible", () => {
-  const base = {
+  type EligibilityInput = {
+    enabled: boolean;
+    fetchStrategy: string | null;
+    verificationStatus: string | null;
+    metadata: string | null;
+  };
+  const base: EligibilityInput = {
     enabled: true,
     fetchStrategy: "SCRAPER",
     verificationStatus: "scraper_candidate",
     metadata: null,
-  } as any;
+  };
 
   it("eligible when SCRAPER + scraper_candidate + enabled + flag on", () => {
     expect(isScraperEligible(base, true)).toBe(true);
