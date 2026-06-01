@@ -52,7 +52,7 @@ export type PaginatedJobs = {
 
 const validStatuses = new Set(["NEW", "SAVED", "APPLIED", "SKIPPED"]);
 const validSponsorships = new Set(["YES", "NO", "UNKNOWN"]);
-const validProviders = new Set(["GREENHOUSE", "LEVER", "ASHBY", "CUSTOM"]);
+const validProviders = new Set(["GREENHOUSE", "LEVER", "ASHBY", "CUSTOM", "WORKDAY"]);
 
 export async function getPaginatedJobs(
   params: JobQueryParams,

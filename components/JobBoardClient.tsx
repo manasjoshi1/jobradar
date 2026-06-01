@@ -272,7 +272,7 @@ const statuses: Array<"ALL" | JobStatus> = [
   "SKIPPED",
 ];
 const sponsorships: Array<"ANY" | Sponsorship> = ["ANY", "YES", "NO", "UNKNOWN"];
-const providers = ["ALL", "GREENHOUSE", "LEVER", "ASHBY", "CUSTOM"];
+const providers = ["ALL", "GREENHOUSE", "LEVER", "ASHBY", "CUSTOM", "WORKDAY"];
 const activeOptions = ["true", "all", "false"] as const;
 const pageSizes = [25, 50, 100];
 

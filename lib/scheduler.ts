@@ -15,9 +15,12 @@ import { recoverAbandonedRuns } from "@/lib/services/run-recovery-service";
 import { runSync } from "@/lib/services/sync-service";
 import { sendRecommendationNotification } from "@/lib/services/notification-service";
 import { sendAllNewJobsNotification } from "@/lib/services/all-new-jobs-notification-service";
+import { runWorkdayMaintenance, validateScraperCandidates } from "@/lib/services/workday-maintenance-service";
 
 let isRunning  = false;
 let isScheduled = false;
+/** Counts scheduler ticks so Workday maintenance runs hourly (every 2nd 30-min tick). */
+let tickCount  = 0;
 
 async function runScheduledJob() {
   if (isRunning) {
@@ -32,7 +35,26 @@ async function runScheduledJob() {
     // 1. Recover abandoned runs
     await recoverAbandonedRuns(30);
 
-    // 2. Sync jobs
+    // 1b. Workday lifecycle maintenance — hourly (every 2nd 30-min tick).
+    //     Re-probes failed/disabled Workday sources outside the normal sync path
+    //     so the lifecycle self-heals (recoveries re-enabled, regressions demoted)
+    //     and the Sources-tab health panel stays fresh.
+    const runWorkdayPass = tickCount % 2 === 0;
+    tickCount++;
+    if (runWorkdayPass) {
+      try {
+        await runWorkdayMaintenance();
+        // Activate any promoted scraper candidates (browser run → api_valid or
+        // scraper_valid + enabled). No-op when WORKDAY_SCRAPER_ENABLED != true
+        // or when there are no candidates. Bounded to cap Chromium time.
+        await validateScraperCandidates({ limit: 5 });
+      } catch (err) {
+        console.error("[scheduler] Workday maintenance failed:", err);
+      }
+    }
+
+    // 2. Sync jobs (includes Workday api_valid via API + scraper for any
+    //    source promoted to scraper_candidate / scraper_valid).
     const syncResult = await runSync();
     console.log(
       `[scheduler] Sync done — created=${syncResult.jobsCreated} updated=${syncResult.jobsUpdated} ` +
